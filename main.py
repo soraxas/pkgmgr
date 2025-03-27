@@ -226,7 +226,7 @@ def run():
     global CURRENT_PKG_CTX
 
     # import all .py file in the current directory
-    for file in pathlib.Path("./configs").glob("*.py"):
+    for file in sorted(pathlib.Path("./configs").glob("*.py")):
         spec = importlib.util.spec_from_file_location(file.name, file)
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
