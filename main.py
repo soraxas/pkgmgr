@@ -7,62 +7,40 @@ from typing import Optional
 import threading
 import importlib.util
 import pathlib
+import printer
 
 from dataclasses import dataclass
+from printer import ASK_USER, ERROR, ERROR_EXIT, GREEN, INFO, RED, TERM_STDERR, TERM_STDOUT
 from registry import MANAGERS as requested_manager
 
 
-GREEN = "\033[92m"
-RED = "\033[91m"
-BLUE = "\033[33m"
-PINK = "\033[95m"
-CYAN = "\033[96m"
-GREY = "\033[90m"
-END = "\033[0m"
-NORMAL = END
-
-CURRENT_PKG_CTX: Optional[str] = None
-
-def my_print(text: str, color: str, file=None) -> None:
-    global CURRENT_PKG_CTX
-    pkg_txt = f"{BLUE}[{CURRENT_PKG_CTX}] " if CURRENT_PKG_CTX else ""
-    print(f"{GREY}::: {pkg_txt}{color}{text}{END}", file=file)
-
-def TERM_STDOUT(text: str, **kw):
-    my_print(text, NORMAL, **kw)
-
-def TERM_STDERR(text: str, **kw) -> str:
-    my_print(text, PINK, **kw, file=sys.stderr)
-
-def INFO(text: str, color=CYAN) -> None:
-    my_print(text, color)
-
-def ERROR(text: str) -> None:
-    my_print(text, RED, file=sys.stderr)
-
-def ERROR_EXIT(*args, **kw):
-    ERROR(*args, **kw)
-    exit(1)
-
-def ASK_USER(question: str) -> bool:
-    """
-    Ask the user a yes/no question and return the answer.
-    """
-    while True:
-        answer = input(f"{GREY}> {CYAN}{question} (y/n){END} ").lower()
-        if answer in ["y", "yes"]:
-            return True
-        elif answer in ["n", "no"]:
-            return False
-        else:
-            ERROR(f"Invalid input, please enter 'y' or 'n'{END}")
 
 
 def stream_output(pipe, print_func):
     """Reads output from a pipe and prints it with the given color."""
-    for line in iter(pipe.readline, ''):
-        print_func(line.strip())
+    # for line in iter(pipe.readline, ''):
+    #     print_func(line.strip())
+    """Reads output from a pipe character-by-character and prints it with the given color."""
+    needs_prefix = True
+    for char in iter(lambda: pipe.read(1), ''):
+        if needs_prefix:
+            needs_prefix = False
+            print_func("", end='')
+        print(f"{char}", end='', flush=True)
+        if char == '\n':
+            needs_prefix = True
     pipe.close()
+
+def handle_input(process):
+    """Reads user input and forwards it to the subprocess, detecting Enter key presses."""
+    while process.poll() is None:
+        try:
+            user_input = input()
+            print(f"\033[94m[INPUT] {user_input}\033[0m")  # Print input with prefix
+            process.stdin.write(user_input + "\n")
+            process.stdin.flush()
+        except EOFError:
+            break
 
 def command_runner_stream(command: list[str]) -> bool:
     """
@@ -70,7 +48,7 @@ def command_runner_stream(command: list[str]) -> bool:
     """
     TERM_STDOUT(f"$ {' '.join(command)}")
     process = subprocess.Popen(
-        command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+        command, stdin=sys.stdin, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1
     )
 
     stdout_thread = threading.Thread(target=stream_output, args=(process.stdout, TERM_STDOUT))
@@ -126,6 +104,7 @@ class PackageManager(ABC):
         pass
 
 
+from aio import command_runner_stream
 
 
 @dataclass
@@ -139,25 +118,25 @@ class SimplePackageManager(PackageManager):
     supports_multi_pkgs: bool
 
 
-    def install(self, package_names: list[str]) -> bool:
+    async def install(self, package_names: list[str]) -> bool:
         if self.supports_multi_pkgs:
             cmd = self.install_cmd.replace("{}", " ".join(package_names))
-            return command_runner_stream(shlex.split(cmd))
+            return await command_runner_stream(shlex.split(cmd))
         else:
             for pkg_name in package_names:
                 cmd = self.install_cmd.replace("{}", pkg_name)
-                if not command_runner_stream(shlex.split(cmd)):
+                if not await command_runner_stream(shlex.split(cmd)):
                     return False
             return True
 
-    def remove(self, package_names: list[str]) -> bool:
+    async def remove(self, package_names: list[str]) -> bool:
         if self.supports_multi_pkgs:
             cmd = self.remove_cmd.replace("{}", " ".join(package_names))
-            return command_runner_stream(shlex.split(cmd))
+            return await command_runner_stream(shlex.split(cmd))
         else:
             for pkg_name in package_names:
                 cmd = self.remove_cmd.replace("{}", pkg_name)
-                if not command_runner_stream(shlex.split(cmd)):
+                if not await command_runner_stream(shlex.split(cmd)):
                     return False
             return True
 
@@ -222,8 +201,7 @@ with open("config.toml", 'rb') as f:
 
 
 
-def run():
-    global CURRENT_PKG_CTX
+async def run():
 
     # import all .py file in the current directory
     for file in sorted(pathlib.Path("./configs").glob("*.py")):
@@ -244,7 +222,7 @@ def run():
             mgr_config.get("supports_multi_pkgs", False)
         )
 
-        CURRENT_PKG_CTX = requested_mgr.name
+        printer.CURRENT_PKG_CTX = requested_mgr.name
 
         INFO(f"Checking packages state...")
 
@@ -272,11 +250,11 @@ def run():
 
             if ASK_USER("Do you want to apply the changes?"):
                 if will_install_packages:
-                    if not pkg_mgr.install([pkg.get_part() for pkg in will_install_packages]):
+                    if not await pkg_mgr.install([pkg.get_part() for pkg in will_install_packages]):
                         ERROR_EXIT("Failed to install packages.")
 
                 if not_recorded:
-                    if not pkg_mgr.remove(not_recorded):
+                    if not await pkg_mgr.remove(not_recorded):
                         ERROR_EXIT(f"Failed to remove packages.")
 
             else:
@@ -286,6 +264,7 @@ def run():
         else:
             INFO(f"No Change.")
 
+import asyncio
 
 if __name__ == "__main__":
-    run()
+    asyncio.run(run())  # Example usage
