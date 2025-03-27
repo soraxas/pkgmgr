@@ -7,11 +7,20 @@ class Package:
     A class that represents a package.
     If install_cmd_part is None, it is assumed that the package is installed via its own name.
     """
-    name: str
-    install_cmd_part: Optional[str] = None
+
+    def __init__(self, name: str, *, install_cmd: Optional[str] = None, extra: Optional[str] = None):
+        if install_cmd and extra:
+            raise ValueError("Cannot have both install_cmd and extra")
+        self.name = name
+        self.install_cmd = install_cmd
+        self.extra = extra
 
     def get_part(self):
-        return self.name if self.install_cmd_part is None else self.install_cmd_part
+        if self.install_cmd:
+            return self.install_cmd
+        if self.extra:
+            return f"{self.name} {self.extra}"
+        return self.name
 
     def __hash__(self):
         return hash(self.name)
