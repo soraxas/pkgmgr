@@ -248,31 +248,31 @@ def run():
 
         INFO(f"Checking packages state...")
 
-        want_installed = set(requested_mgr.pkgs)
+        want_installed = requested_mgr.pkgs
         currently_installed_packages = set(pkg_mgr.list_installed())
 
         #######################################################
 
         will_install_packages = set()
         for package in want_installed:
-            if package not in currently_installed_packages:
+            if package.name not in currently_installed_packages:
                 will_install_packages.add(package)
 
         #######################################################
 
-        not_recorded = currently_installed_packages - want_installed
+        not_recorded = currently_installed_packages - {want_installed.name for want_installed in want_installed}
         if will_install_packages or not_recorded:
             INFO("The following changes to packages will be applied:")
 
             for package in will_install_packages:
-                INFO(f"  + {package}", GREEN)
-            for package in not_recorded:
-                INFO(f"  - {package}", RED)
+                INFO(f"  + {package.name}", GREEN)
+            for package_name in not_recorded:
+                INFO(f"  - {package_name}", RED)
 
 
             if ASK_USER("Do you want to apply the changes?"):
                 if will_install_packages:
-                    if not pkg_mgr.install(will_install_packages):
+                    if not pkg_mgr.install([pkg.get_part() for pkg in will_install_packages]):
                         ERROR_EXIT("Failed to install packages.")
 
                 if not_recorded:
