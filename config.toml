@@ -1,7 +1,8 @@
 [manager.shsh]
 supports_multi_pkgs = false
 list_cmd = "shsh list"
-install_cmd = "shsh install {}"
+install_cmd = "python tt.py {}"
+# install_cmd = "shsh install {}"
 remove_cmd = "shsh uninstall {}"
 
 [manager.fisher]
@@ -9,3 +10,4 @@ supports_multi_pkgs = true
 list_cmd = "fish -c 'fisher list'"
 install_cmd = "fish -c 'fisher install {}'"
 remove_cmd = "fish -c 'fisher remove {}'"
+

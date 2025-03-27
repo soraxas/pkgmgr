@@ -6,10 +6,11 @@ shsh = MANAGERS["shsh"]
      shsh
      << "soraxas/yadm"
      << "soraxas/git-utils"
+     << "soraxas/git-utilins"
      << "soraxas/open-rev-ports"
      << "so-fancy/diff-so-fancy"
      << "elasticdog/transcrypt"
-     << Package("tj/git-extras", "tj/git-extras -h pre='PREFIX=myroot make' -v ROOT=myroot")
+     << Package("tj/git-extras", extra="-h pre='PREFIX=myroot make' -v ROOT=myroot")
 )
 
 
