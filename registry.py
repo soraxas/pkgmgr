@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from typing import Optional, Union
 
+
 @dataclass
 class Package:
     """
@@ -8,7 +9,13 @@ class Package:
     If install_cmd_part is None, it is assumed that the package is installed via its own name.
     """
 
-    def __init__(self, name: str, *, install_cmd: Optional[str] = None, extra: Optional[str] = None):
+    def __init__(
+        self,
+        name: str,
+        *,
+        install_cmd: Optional[str] = None,
+        extra: Optional[str] = None,
+    ):
         if install_cmd and extra:
             raise ValueError("Cannot have both install_cmd and extra")
         self.name = name
@@ -25,11 +32,13 @@ class Package:
     def __hash__(self):
         return hash(self.name)
 
+
 @dataclass
 class DeclaredPackageManager:
     """
     A class that represents a manager for user to declare packages.
     """
+
     name: str
     pkgs: list[str]
 
@@ -55,6 +64,7 @@ class DeclaredPackageManagerRegistry:
     """
     A class to store the declared package managers.
     """
+
     data_pair: dict[str, DeclaredPackageManager]
 
     def __init__(self):

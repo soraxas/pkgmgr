@@ -13,12 +13,12 @@ async def stream_output(stream: asyncio.StreamReader, print_func):
 
         # if we needs prefix now, print it.
         if printer.NEEDS_PREFIX:
-            print_func("", end='')
+            print_func("", end="")
             printer.NEEDS_PREFIX = False
 
         sys.stdout.write(char)
         sys.stdout.flush()
-        if char == '\n':
+        if char == "\n":
             printer.NEEDS_PREFIX = True
 
 
@@ -28,6 +28,7 @@ async def connect_stdin_stdout():
     protocol = asyncio.StreamReaderProtocol(reader)
     await loop.connect_read_pipe(lambda: protocol, sys.stdin)
     return reader
+
 
 async def handle_input(process: asyncio.subprocess.Process):
     """Reads user input and forwards it to the subprocess, detecting Enter key presses."""
@@ -45,6 +46,7 @@ async def handle_input(process: asyncio.subprocess.Process):
 
         await process.stdin.drain()
 
+
 async def command_runner_stream(command: list[str]) -> int:
     """
     Runs a command given as a list of strings and prints stdout in green and stderr in red in real-time.
@@ -52,7 +54,10 @@ async def command_runner_stream(command: list[str]) -> int:
     Returns the process return code.
     """
     process = await asyncio.create_subprocess_exec(
-        *command, stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+        *command,
+        stdin=asyncio.subprocess.PIPE,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE
     )
 
     stdout_task = asyncio.create_task(stream_output(process.stdout, TERM_STDOUT))
@@ -61,7 +66,9 @@ async def command_runner_stream(command: list[str]) -> int:
 
     # Wait for process to finish and ensure input task is properly cleaned up
     await process.wait()
-    await asyncio.wait([stdout_task, stderr_task, input_task], return_when=asyncio.FIRST_COMPLETED)
+    await asyncio.wait(
+        [stdout_task, stderr_task, input_task], return_when=asyncio.FIRST_COMPLETED
+    )
 
     # Once process is complete, cancel the input task and ensure clean-up
     input_task.cancel()
@@ -69,6 +76,7 @@ async def command_runner_stream(command: list[str]) -> int:
     return_code = await process.wait()
     # print(f"Process exited with return code: {return_code}")
     return return_code
+
 
 if __name__ == "__main__":
     asyncio.run(command_runner_stream(["python", "tt.py"]))  # Example usage

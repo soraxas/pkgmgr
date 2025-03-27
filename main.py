@@ -10,10 +10,17 @@ import pathlib
 import printer
 
 from dataclasses import dataclass
-from printer import ASK_USER, ERROR, ERROR_EXIT, GREEN, INFO, RED, TERM_STDERR, TERM_STDOUT
+from printer import (
+    ASK_USER,
+    ERROR,
+    ERROR_EXIT,
+    GREEN,
+    INFO,
+    RED,
+    TERM_STDERR,
+    TERM_STDOUT,
+)
 from registry import MANAGERS as requested_manager
-
-
 
 
 def stream_output(pipe, print_func):
@@ -22,14 +29,15 @@ def stream_output(pipe, print_func):
     #     print_func(line.strip())
     """Reads output from a pipe character-by-character and prints it with the given color."""
     needs_prefix = True
-    for char in iter(lambda: pipe.read(1), ''):
+    for char in iter(lambda: pipe.read(1), ""):
         if needs_prefix:
             needs_prefix = False
-            print_func("", end='')
-        print(f"{char}", end='', flush=True)
-        if char == '\n':
+            print_func("", end="")
+        print(f"{char}", end="", flush=True)
+        if char == "\n":
             needs_prefix = True
     pipe.close()
+
 
 def handle_input(process):
     """Reads user input and forwards it to the subprocess, detecting Enter key presses."""
@@ -42,17 +50,27 @@ def handle_input(process):
         except EOFError:
             break
 
+
 def command_runner_stream(command: list[str]) -> bool:
     """
     Runs a command given as a list of strings and prints stdout in green and stderr in red in real-time.
     """
     TERM_STDOUT(f"$ {' '.join(command)}")
     process = subprocess.Popen(
-        command, stdin=sys.stdin, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1
+        command,
+        stdin=sys.stdin,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        bufsize=1,
     )
 
-    stdout_thread = threading.Thread(target=stream_output, args=(process.stdout, TERM_STDOUT))
-    stderr_thread = threading.Thread(target=stream_output, args=(process.stderr, TERM_STDERR))
+    stdout_thread = threading.Thread(
+        target=stream_output, args=(process.stdout, TERM_STDOUT)
+    )
+    stderr_thread = threading.Thread(
+        target=stream_output, args=(process.stderr, TERM_STDERR)
+    )
 
     stdout_thread.start()
     stderr_thread.start()
@@ -70,6 +88,7 @@ def command_runner(command: list[str]) -> tuple[int, str, str]:
     process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     process.wait()
     return process.returncode, process.stdout.read(), process.stderr.read()
+
 
 class PackageManager(ABC):
     # if the package manager supports multiple installs in one command
@@ -112,11 +131,11 @@ class SimplePackageManager(PackageManager):
     """
     A simple package manager class that uses shell commands to install and remove packages.
     """
+
     install_cmd: str
     remove_cmd: str
     list_cmd: str
     supports_multi_pkgs: bool
-
 
     async def install(self, package_names: list[str]) -> bool:
         if self.supports_multi_pkgs:
@@ -144,11 +163,10 @@ class SimplePackageManager(PackageManager):
         return package_name in self.installed
 
     def list_installed(self) -> list[str]:
-        retcode, stdout, stderr =  command_runner(shlex.split(self.list_cmd))
+        retcode, stdout, stderr = command_runner(shlex.split(self.list_cmd))
         if retcode != 0:
             ERROR_EXIT(f"Failed to list installed packages: {stderr}")
         return stdout.decode().splitlines()
-
 
 
 @dataclass
@@ -156,6 +174,7 @@ class DeclaredPackageManager:
     """
     A class to store the packages declared by the user.
     """
+
     pkgs: list[str]
 
     def add(self, package_name: str):
@@ -165,11 +184,11 @@ class DeclaredPackageManager:
         self.pkgs.remove(package_name)
 
 
-
 class DeclaredPackageManagerRegistry:
     """
     A registry for user to declared package wanted to be installed.
     """
+
     data_pair: dict[str, tuple[SimplePackageManager, DeclaredPackageManager]] = {}
 
     def __getitem__(self, item: str) -> DeclaredPackageManager:
@@ -184,21 +203,19 @@ class DeclaredPackageManagerRegistry:
             config["install_cmd"],
             config["remove_cmd"],
             config["list_cmd"],
-            config.get("supports_multi_pkgs", False)
+            config.get("supports_multi_pkgs", False),
         )
         self.data_pair[item] = (mgr, DeclaredPackageManager(config.get("packages", [])))
         return self.data_pair[item][1]
 
 
-
-with open("config.toml", 'rb') as f:
+with open("config.toml", "rb") as f:
     config = tomllib.load(f)
 
     MANAGERS_CONFIGS = config.get("manager")
     if MANAGERS_CONFIGS is None:
         ERROR("No package managers found in config.toml")
         exit(1)
-
 
 
 async def run():
@@ -213,13 +230,12 @@ async def run():
         if requested_mgr.name not in MANAGERS_CONFIGS:
             ERROR_EXIT(f"Manager for '{requested_mgr.name}' not found in config.toml")
 
-
         mgr_config = MANAGERS_CONFIGS[requested_mgr.name]
         pkg_mgr = SimplePackageManager(
             mgr_config["install_cmd"],
             mgr_config["remove_cmd"],
             mgr_config["list_cmd"],
-            mgr_config.get("supports_multi_pkgs", False)
+            mgr_config.get("supports_multi_pkgs", False),
         )
 
         printer.CURRENT_PKG_CTX = requested_mgr.name
@@ -238,7 +254,9 @@ async def run():
 
         #######################################################
 
-        not_recorded = currently_installed_packages - {want_installed.name for want_installed in want_installed}
+        not_recorded = currently_installed_packages - {
+            want_installed.name for want_installed in want_installed
+        }
         if will_install_packages or not_recorded:
             INFO("The following changes to packages will be applied:")
 
@@ -247,10 +265,11 @@ async def run():
             for package_name in not_recorded:
                 INFO(f"  - {package_name}", RED)
 
-
             if ASK_USER("Do you want to apply the changes?"):
                 if will_install_packages:
-                    if not await pkg_mgr.install([pkg.get_part() for pkg in will_install_packages]):
+                    if not await pkg_mgr.install(
+                        [pkg.get_part() for pkg in will_install_packages]
+                    ):
                         ERROR_EXIT("Failed to install packages.")
 
                 if not_recorded:
@@ -263,6 +282,7 @@ async def run():
             INFO(f"Applied.")
         else:
             INFO(f"No Change.")
+
 
 import asyncio
 
