@@ -250,9 +250,7 @@ async def cmd_save(
                     requested_mgr, pkg_mgr
                 )
 
-                pkg_wanted = sorted(
-                    pkgs_wanted, key=lambda pkg: pkg.name
-                )  # sort by package name
+                pkgs_wanted = sorted(pkgs_wanted, key=lambda pkg: pkg.name)
                 pkgs_not_recorded = sorted(pkgs_not_recorded)
 
                 if pkgs_wanted or pkgs_not_recorded:

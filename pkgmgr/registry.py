@@ -1,8 +1,8 @@
 from dataclasses import dataclass
-from typing import Optional, Union
+from typing import Generator, Iterable, Optional, Union
+from .printer import ERROR_EXIT
 
 
-@dataclass
 class Package:
     """
     A class that represents a package.
@@ -32,14 +32,32 @@ class Package:
     def __hash__(self):
         return hash(self.name)
 
+    def __repr__(self):
+        return f"Package({self.name})"
 
-def ensure_package(package: Union[str, Package]) -> Package:
+
+def ensure_package(
+    package: Union[str, Package, Iterable[Package]],
+) -> Generator[Package]:
     """
     Ensure that the package is a Package instance.
     """
     if isinstance(package, str):
-        return Package(package)
-    return package
+        yield Package(package)
+        return
+    elif isinstance(package, Package):
+        yield package
+        return
+    else:
+        try:
+            some_object_iterator = iter(package)
+        except TypeError as te:
+            # not iterable.
+            ERROR_EXIT(
+                f"Package {package} is not a string, Package instance, nor list of Packages. Please check your configuration."
+            )
+        for pkg in some_object_iterator:
+            yield from ensure_package(pkg)
 
 
 @dataclass
@@ -51,8 +69,10 @@ class DeclaredPackageManager:
     name: str
     pkgs: list[Package]
 
-    def add(self, package: Union[str, Package]) -> "DeclaredPackageManager":
-        self.pkgs.append(ensure_package(package))
+    def add(
+        self, package: Union[str, Package, Iterable[Package]]
+    ) -> "DeclaredPackageManager":
+        self.pkgs.extend(ensure_package(package))
         return self
 
     def __lshift__(self, *args) -> "DeclaredPackageManager":

@@ -108,7 +108,7 @@ def ASK_USER(question: str) -> bool:
     while True:
         print_prefix()
         answer = input(
-            f"{BOLD_PURPLE}{BOLD}> {UNDERLINE}{question} (y/n){END} "
+            f"{BOLD_PURPLE}{BOLD}> {UNDERLINE}{question}{END} {BOLD_PURPLE}(y/n){BLUE} "
         ).lower()
         NEEDS_PREFIX = True
         if answer in ["y", "yes"]:
