@@ -5,8 +5,9 @@ import shlex
 from typing import Optional
 import importlib.util
 import pathlib
+import re
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from .aio import command_runner_stream
 from . import printer
 from .printer import (
@@ -18,6 +19,8 @@ from .printer import (
     RED,
 )
 from .registry import MANAGERS as requested_manager
+
+DEFAULT_SAVE_OUTPUT_FILE = "99.unsorted.py"
 
 
 def command_runner(command: list[str]) -> tuple[int, str, str]:
@@ -72,26 +75,39 @@ class SimplePackageManager(PackageManager):
     remove_cmd: str
     list_cmd: str
     supports_multi_pkgs: bool
+    success_ret_code: set[int] = field(default_factory=lambda: {0})
 
-    async def install(self, package_names: list[str]) -> bool:
+    def check_ret_code(self, retcode: int) -> bool:
+        """
+        Check if the return code is in the success return code set.
+        """
+        return retcode in self.success_ret_code
+
+    async def install(self, packages: list[PackageManager]) -> bool:
         if self.supports_multi_pkgs:
-            cmd = self.install_cmd.replace("{}", " ".join(package_names))
-            return await command_runner_stream(shlex.split(cmd))
+            cmd = self.install_cmd.replace(
+                "{}", " ".join(pkg.get_part() for pkg in packages)
+            )
+            return self.check_ret_code(await command_runner_stream(shlex.split(cmd)))
         else:
-            for pkg_name in package_names:
-                cmd = self.install_cmd.replace("{}", pkg_name)
-                if not await command_runner_stream(shlex.split(cmd)):
+            for pkg in packages:
+                cmd = self.install_cmd.replace("{}", pkg.name)
+                if not self.check_ret_code(
+                    await command_runner_stream(shlex.split(cmd))
+                ):
                     return False
             return True
 
     async def remove(self, package_names: list[str]) -> bool:
         if self.supports_multi_pkgs:
             cmd = self.remove_cmd.replace("{}", " ".join(package_names))
-            return await command_runner_stream(shlex.split(cmd))
+            return self.check_ret_code(await command_runner_stream(shlex.split(cmd)))
         else:
             for pkg_name in package_names:
                 cmd = self.remove_cmd.replace("{}", pkg_name)
-                if not await command_runner_stream(shlex.split(cmd)):
+                if not self.check_ret_code(
+                    await command_runner_stream(shlex.split(cmd))
+                ):
                     return False
             return True
 
@@ -172,6 +188,94 @@ def load_all(config_dir: str = "./configs"):
         return managers
 
 
+async def collect_state(
+    requested_mgr: PackageManager, pkg_mgr: PackageManager
+) -> tuple[set[PackageManager], set[str]]:
+    """
+    Collect the state of all package managers.
+    """
+    INFO(f"Checking packages state...")
+
+    want_installed = requested_mgr.pkgs
+    currently_installed_packages = set(pkg_mgr.list_installed())
+
+    #######################################################
+
+    pkgs_wanted = set()
+    for package in want_installed:
+        if package.name not in currently_installed_packages:
+            pkgs_wanted.add(package)
+
+    #######################################################
+
+    pkgs_not_recorded = currently_installed_packages - {
+        want_installed.name for want_installed in want_installed
+    }
+    return pkgs_wanted, pkgs_not_recorded
+
+
+def santise_variable_name(var_str: str):
+    """
+    Sanitise a variable name by replacing non-alphanumeric characters with underscores.
+    """
+    return re.sub("\W|^(?=\d)", "_", var_str)
+
+
+async def cmd_save(
+    config_dir: pathlib.Path, managers: dict[str, PackageManager]
+) -> None:
+    if (config_dir / DEFAULT_SAVE_OUTPUT_FILE).is_file():
+        ERROR_EXIT(
+            f"File '{DEFAULT_SAVE_OUTPUT_FILE}' already exists. Refusing to continue. "
+            "Please organise your packages definition in the config directory first."
+        )
+    import sys
+
+    with open(
+        # "/tmp/rDEFAULT_SAVE_OUTPUT_FILE", "a", encoding="utf-8"
+        config_dir / DEFAULT_SAVE_OUTPUT_FILE,
+        "a",
+        encoding="utf-8",
+    ) as f:
+
+        f.write("from pkgmgr.registry import MANAGERS, Package\n\n")
+
+        for requested_mgr in requested_manager.data_pair.values():
+
+            pkg_mgr = managers[requested_mgr.name]
+
+            with printer.PKG_CTX(requested_mgr.name):
+
+                pkgs_wanted, pkgs_not_recorded = await collect_state(
+                    requested_mgr, pkg_mgr
+                )
+
+                pkg_wanted = sorted(
+                    pkgs_wanted, key=lambda pkg: pkg.name
+                )  # sort by package name
+                pkgs_not_recorded = sorted(pkgs_not_recorded)
+
+                if pkgs_wanted or pkgs_not_recorded:
+                    IDEN_var_name = santise_variable_name(requested_mgr.name)
+
+                    f.write("\n" + "#" * 25 + "\n")
+                    f.write(f"# {requested_mgr.name}\n")
+                    f.write("#" * 25 + "\n")
+
+                    f.write(f'\n{IDEN_var_name} = MANAGERS["{IDEN_var_name}"]\n')
+
+                    # invert to bring the config up-to-speed
+
+                    if pkgs_not_recorded:
+                        f.write(f"\n# wanted\n")
+                        for pkg_name in pkgs_not_recorded:
+                            f.write(f'{IDEN_var_name} << "{pkg_name}"\n')
+                    if pkgs_wanted:
+                        f.write(f"\n# unwanted\n")
+                        for pkg in pkgs_wanted:
+                            f.write(f'{IDEN_var_name} >> "{pkg.name}"\n')
+
+
 async def cmd_apply(managers: dict[str, PackageManager]) -> None:
     for requested_mgr in requested_manager.data_pair.values():
 
@@ -179,39 +283,23 @@ async def cmd_apply(managers: dict[str, PackageManager]) -> None:
 
         with printer.PKG_CTX(requested_mgr.name):
 
-            INFO(f"Checking packages state...")
+            pkgs_wanted, pkgs_not_recorded = await collect_state(requested_mgr, pkg_mgr)
 
-            want_installed = requested_mgr.pkgs
-            currently_installed_packages = set(pkg_mgr.list_installed())
-
-            #######################################################
-
-            will_install_packages = set()
-            for package in want_installed:
-                if package.name not in currently_installed_packages:
-                    will_install_packages.add(package)
-
-            #######################################################
-
-            not_recorded = currently_installed_packages - {
-                want_installed.name for want_installed in want_installed
-            }
-            if will_install_packages or not_recorded:
+            if pkgs_wanted or pkgs_not_recorded:
                 INFO("The following changes to packages will be applied:")
 
-                for package in will_install_packages:
+                for package in pkgs_wanted:
                     INFO(f"  + {package.name}", GREEN)
-                for package_name in not_recorded:
+                for package_name in pkgs_not_recorded:
                     INFO(f"  - {package_name}", RED)
 
                 if ASK_USER("Do you want to apply the changes?"):
-                    if will_install_packages:
-                        if not await pkg_mgr.install():
-                            [pkg.get_part() for pkg in will_install_packages]
+                    if pkgs_wanted:
+                        if not await pkg_mgr.install(pkgs_wanted):
                             ERROR_EXIT("Failed to install packages.")
 
-                    if not_recorded:
-                        if not await pkg_mgr.remove(not_recorded):
+                    if pkgs_not_recorded:
+                        if not await pkg_mgr.remove(pkgs_not_recorded):
                             ERROR_EXIT(f"Failed to remove packages.")
 
                 else:

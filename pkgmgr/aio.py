@@ -5,21 +5,24 @@ from . import printer
 from .printer import TERM_STDERR, TERM_STDOUT
 
 
-async def stream_output(stream: asyncio.StreamReader, print_func):
+async def stream_output(stream: asyncio.StreamReader, suffix: str, print_func):
     """Reads output from a stream character-by-character, detects newlines, and request a prefix when so."""
-    while not stream.at_eof():
-        char = await stream.read(1)
-        char = char.decode()
 
-        # if we needs prefix now, print it.
-        if printer.NEEDS_PREFIX:
-            print_func("", end="")
-            printer.NEEDS_PREFIX = False
+    with printer.PKG_CTX(suffix):
+        while not stream.at_eof():
+            char = await stream.read(1)
+            char = char.decode()
 
-        sys.stdout.write(char)
-        sys.stdout.flush()
-        if char == "\n":
-            printer.NEEDS_PREFIX = True
+            if char:
+                # if we needs prefix now, print it.
+                if printer.NEEDS_PREFIX:
+                    print_func(f"", end="")
+                    printer.NEEDS_PREFIX = False
+
+                sys.stdout.write(char)
+                sys.stdout.flush()
+                if char == "\n":
+                    printer.NEEDS_PREFIX = True
 
 
 async def connect_stdin_stdout():
@@ -57,23 +60,23 @@ async def command_runner_stream(command: list[str]) -> int:
         *command,
         stdin=asyncio.subprocess.PIPE,
         stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE
+        stderr=asyncio.subprocess.PIPE,
     )
 
-    stdout_task = asyncio.create_task(stream_output(process.stdout, TERM_STDOUT))
-    stderr_task = asyncio.create_task(stream_output(process.stderr, TERM_STDERR))
+    stdout_task = asyncio.create_task(stream_output(process.stdout, ">&1", TERM_STDOUT))
+    stderr_task = asyncio.create_task(stream_output(process.stderr, ">&2", TERM_STDOUT))
     input_task = asyncio.create_task(handle_input(process))
 
     # Wait for process to finish and ensure input task is properly cleaned up
-    await process.wait()
-    await asyncio.wait(
-        [stdout_task, stderr_task, input_task], return_when=asyncio.FIRST_COMPLETED
-    )
+    return_code = await process.wait()
 
     # Once process is complete, cancel the input task and ensure clean-up
     input_task.cancel()
 
-    return_code = await process.wait()
+    await asyncio.wait(
+        [stdout_task, stderr_task, input_task],  # return_when=asyncio.FIRST_COMPLETED
+    )
+
     # print(f"Process exited with return code: {return_code}")
     return return_code
 

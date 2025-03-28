@@ -33,6 +33,15 @@ class Package:
         return hash(self.name)
 
 
+def ensure_package(package: Union[str, Package]) -> Package:
+    """
+    Ensure that the package is a Package instance.
+    """
+    if isinstance(package, str):
+        return Package(package)
+    return package
+
+
 @dataclass
 class DeclaredPackageManager:
     """
@@ -40,12 +49,10 @@ class DeclaredPackageManager:
     """
 
     name: str
-    pkgs: list[str]
+    pkgs: list[Package]
 
     def add(self, package: Union[str, Package]) -> "DeclaredPackageManager":
-        if isinstance(package, str):
-            package = Package(package)
-        self.pkgs.append(package)
+        self.pkgs.append(ensure_package(package))
         return self
 
     def __lshift__(self, *args) -> "DeclaredPackageManager":

@@ -1,3 +1,4 @@
+from contextvars import ContextVar
 import sys
 from typing import Optional
 
@@ -10,7 +11,9 @@ CYAN = "\033[96m"
 GREY = "\033[90m"
 END = "\033[0m"
 NORMAL = END
-
+BOLD_PURPLE = "\033[35m"
+UNDERLINE = "\033[4m"
+BOLD = "\033[1m"
 
 NEEDS_PREFIX = True
 
@@ -22,20 +25,35 @@ class PackageContext:
     """
 
     def __init__(self):
-        self.current_pkg: Optional[str] = None
-        self.stack_depth: int = 0
+        self.current_pkg: Optional[str] = ContextVar("current_pkg", default=None)
+        self.current_pkg_tokens = []
+
+        # self.current_pkg: Optional[str] = None
+        # self.stack_depth: int = 0
 
     def __call__(self, pkg_name: str):
-        self.current_pkg = pkg_name
+        prefix = self.current_pkg.get()
+        if prefix is not None:
+            prefix = f"{prefix}:{pkg_name}"
+        else:
+            prefix = pkg_name
+        self.current_pkg.set(prefix)
+
         return self
 
     def __enter__(self):
-        self.stack_depth += 1
+        # self.stack_depth += 1
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        self.stack_depth -= 1
-        self.current_pkg = None
+        # self.stack_depth -= 1
+        prefix = self.current_pkg.get()
+        if prefix is not None:
+            prefix = prefix.split(":")
+            if len(prefix) > 1:
+                self.current_pkg.set(prefix[-2])
+            else:
+                self.current_pkg.set(None)
 
 
 PKG_CTX = PackageContext()
@@ -43,8 +61,11 @@ PKG_CTX = PackageContext()
 
 def print_prefix(**kw):
     global NEEDS_PREFIX
-    pkg_txt = f"{BLUE}[{PKG_CTX.current_pkg}] " if PKG_CTX.current_pkg else ""
-    print(f"{GREY}{':' * PKG_CTX.stack_depth} {pkg_txt}", **kw, end="")
+
+    pkg = PKG_CTX.current_pkg.get()
+    pkg_txt = f"{BLUE}[{pkg}] " if pkg else ""
+    # print('33')
+    print(f"{GREY}:: {pkg_txt}", **kw, end="")
     sys.stdout.flush()
     NEEDS_PREFIX = False
 
@@ -82,8 +103,14 @@ def ASK_USER(question: str) -> bool:
     """
     Ask the user a yes/no question and return the answer.
     """
+    global NEEDS_PREFIX
+
     while True:
-        answer = input(f"{GREY}> {CYAN}{question} (y/n){END} ").lower()
+        print_prefix()
+        answer = input(
+            f"{BOLD_PURPLE}{BOLD}> {UNDERLINE}{question} (y/n){END} "
+        ).lower()
+        NEEDS_PREFIX = True
         if answer in ["y", "yes"]:
             return True
         elif answer in ["n", "no"]:

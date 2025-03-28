@@ -25,7 +25,7 @@ def main():
     parser.add_argument(
         "-c",
         "--config-dir",
-        type=str,
+        type=Path,
         help="Set the path to your configuration directory",
         default=Path(configpath),
     )
@@ -52,17 +52,6 @@ def main():
         help="Command to execute",
     )
 
-    # subparsers = parser.add_subparsers(dest="command", help="Available commands")
-
-    # # Save action
-    # save_parser = subparsers.add_parser("save", help="Update the configuration to reflect the current state of the system")
-    # # Apply action
-    # apply_parser = subparsers.add_parser("apply", help="Update the system to reflect the current contents of the configuration")
-    # # Check action
-    # check_parser = subparsers.add_parser("check", help="Syntax-check and lint the configuration")
-    # # Diff action
-    # diff_parser = subparsers.add_parser("diff", help="Compare configuration and system")
-
     args = parser.parse_args()
 
     from . import core
@@ -71,11 +60,11 @@ def main():
 
     manager = core.load_all(args.config_dir)
 
-    with printer.PKG_CTX:
+    with printer.PKG_CTX(args.command):
         INFO(f"Executing {args.command}...")
 
         if args.command == "save":
-            asyncio.run()
+            asyncio.run(core.cmd_save(args.config_dir, manager))
 
         elif args.command == "apply":
             asyncio.run(core.cmd_apply(manager))
