@@ -229,49 +229,57 @@ async def cmd_save(
             f"File '{DEFAULT_SAVE_OUTPUT_FILE}' already exists. Refusing to continue. "
             "Please organise your packages definition in the config directory first."
         )
-    import sys
 
-    with open(
-        # "/tmp/rDEFAULT_SAVE_OUTPUT_FILE", "a", encoding="utf-8"
-        config_dir / DEFAULT_SAVE_OUTPUT_FILE,
-        "a",
-        encoding="utf-8",
-    ) as f:
+    packages_to_write_functor = []
 
-        f.write("from pkgmgr.registry import MANAGERS, Package\n\n")
+    # process all requested managers and see if we need to write anything
+    for requested_mgr in requested_manager.data_pair.values():
+        pkg_mgr = managers[requested_mgr.name]
 
-        for requested_mgr in requested_manager.data_pair.values():
+        with printer.PKG_CTX(requested_mgr.name):
 
-            pkg_mgr = managers[requested_mgr.name]
+            pkgs_wanted, pkgs_not_recorded = await collect_state(requested_mgr, pkg_mgr)
 
-            with printer.PKG_CTX(requested_mgr.name):
+            pkgs_wanted = sorted(pkgs_wanted, key=lambda pkg: pkg.name)
+            pkgs_not_recorded = sorted(pkgs_not_recorded)
 
-                pkgs_wanted, pkgs_not_recorded = await collect_state(
-                    requested_mgr, pkg_mgr
-                )
+            if pkgs_wanted or pkgs_not_recorded:
 
-                pkgs_wanted = sorted(pkgs_wanted, key=lambda pkg: pkg.name)
-                pkgs_not_recorded = sorted(pkgs_not_recorded)
-
-                if pkgs_wanted or pkgs_not_recorded:
+                def functor(file):
                     IDEN_var_name = santise_variable_name(requested_mgr.name)
 
-                    f.write("\n" + "#" * 25 + "\n")
-                    f.write(f"# {requested_mgr.name}\n")
-                    f.write("#" * 25 + "\n")
+                    file.write("\n" + "#" * 25 + "\n")
+                    file.write(f"# {requested_mgr.name}\n")
+                    file.write("#" * 25 + "\n")
 
-                    f.write(f'\n{IDEN_var_name} = MANAGERS["{IDEN_var_name}"]\n')
+                    file.write(f'\n{IDEN_var_name} = MANAGERS["{IDEN_var_name}"]\n')
 
                     # invert to bring the config up-to-speed
 
                     if pkgs_not_recorded:
-                        f.write(f"\n# wanted\n")
+                        file.write(f"\n# wanted\n")
                         for pkg_name in pkgs_not_recorded:
-                            f.write(f'{IDEN_var_name} << "{pkg_name}"\n')
+                            file.write(f'{IDEN_var_name} << "{pkg_name}"\n')
                     if pkgs_wanted:
-                        f.write(f"\n# unwanted\n")
+                        file.write(f"\n# unwanted\n")
                         for pkg in pkgs_wanted:
-                            f.write(f'{IDEN_var_name} >> "{pkg.name}"\n')
+                            file.write(f'{IDEN_var_name} >> "{pkg.name}"\n')
+
+                packages_to_write_functor.append(functor)
+
+    # only start a new file if we have something to write
+    if packages_to_write_functor:
+        with open(
+            config_dir / DEFAULT_SAVE_OUTPUT_FILE,
+            "a",
+            encoding="utf-8",
+        ) as f:
+
+            f.write("from pkgmgr.registry import MANAGERS, Package\n\n")
+
+            for functor in packages_to_write_functor:
+
+                functor(file=f)
 
 
 async def cmd_apply(managers: dict[str, PackageManager]) -> None:
