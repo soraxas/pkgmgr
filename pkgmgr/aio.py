@@ -1,12 +1,12 @@
 import asyncio
 import sys
 
-import printer
-from printer import TERM_STDERR, TERM_STDOUT
+from . import printer
+from .printer import TERM_STDERR, TERM_STDOUT
 
 
 async def stream_output(stream: asyncio.StreamReader, print_func):
-    """Reads output from a stream character-by-character, detects newlines, and prints with a prefix."""
+    """Reads output from a stream character-by-character, detects newlines, and request a prefix when so."""
     while not stream.at_eof():
         char = await stream.read(1)
         char = char.decode()
@@ -79,5 +79,6 @@ async def command_runner_stream(command: list[str]) -> int:
 
 
 if __name__ == "__main__":
-    asyncio.run(command_runner_stream(["python", "tt.py"]))  # Example usage
-    # asyncio.run(command_runner(["python", "tt.py"]))  # Example usage
+    asyncio.run(
+        command_runner_stream(["python", "-c", "input('here ')"])
+    )  # Example usage
