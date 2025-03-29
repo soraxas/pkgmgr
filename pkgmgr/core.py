@@ -264,10 +264,12 @@ async def cmd_save(
                         file.write(f"\n# wanted\n")
                         for pkg_name in pkgs_not_recorded:
                             file.write(f'{IDEN_var_name} << "{pkg_name}"\n')
+                            INFO(f"Added {pkg_name}")
                     if pkgs_wanted:
                         file.write(f"\n# unwanted\n")
                         for pkg in pkgs_wanted:
                             file.write(f'{IDEN_var_name} >> "{pkg.name}"\n')
+                            INFO(f"To remove {pkg_name}")
 
                 packages_to_write_functor.append(functor)
 
