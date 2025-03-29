@@ -50,7 +50,7 @@ async def handle_input(process: asyncio.subprocess.Process):
         await process.stdin.drain()
 
 
-async def command_runner_stream(command: list[str]) -> int:
+async def command_runner_stream(command: str) -> int:
     """
     Runs a command given as a list of strings and prints stdout in green and stderr in red in real-time.
     Adds a prefix for new lines and detects user input.
@@ -81,7 +81,7 @@ async def command_runner_stream(command: list[str]) -> int:
     return return_code
 
 
-if __name__ == "__main__":
-    asyncio.run(
-        command_runner_stream(["python", "-c", "input('here ')"])
-    )  # Example usage
+# if __name__ == "__main__":
+#     asyncio.run(
+#         command_runner_stream(["python", "-c", "input('here ')"])
+#     )  # Example usage

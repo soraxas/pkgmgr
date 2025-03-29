@@ -18,7 +18,7 @@ from .printer import (
     GREEN,
     RED,
 )
-from .registry import MANAGERS as requested_manager
+from .registry import MANAGERS
 
 DEFAULT_SAVE_OUTPUT_FILE = "99.unsorted.py"
 
@@ -126,10 +126,12 @@ def load_user_configs(config_dir: pathlib.Path) -> None:
     Load user configs from the config directory.
     """
     # import all .py file in the config directory
-    for file in sorted(config_dir.glob("*.py")):
-        spec = importlib.util.spec_from_file_location(file.name, file)
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
+    with printer.PKG_CTX("pkg-state"):
+        for file in sorted(config_dir.glob("*.py")):
+            INFO(f"Sourcing '{file}'...")
+            spec = importlib.util.spec_from_file_location(file.name, file)
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
 
 
 def load_mgr_config(
@@ -152,24 +154,25 @@ def load_mgr_config(
             exit(1)
 
     mgrs = {}
-    for mgr_name in requested_mgrs:
-        if mgr_name not in managers_conf:
-            ERROR_EXIT(f"Manager for '{mgr_name}' not found in {pkg_mgr_config}")
-        mgr_config = managers_conf[mgr_name]
-        if any(
-            key not in mgr_config for key in ["install_cmd", "remove_cmd", "list_cmd"]
-        ):
-            ERROR_EXIT(
-                f"Manager '{mgr_name}' is missing required commands in config.toml"
-            )
+    for mgr_name, mgr_config in managers_conf.items():
 
-        pkg_mgr = SimplePackageManager(
-            mgr_config["install_cmd"],
-            mgr_config["remove_cmd"],
-            mgr_config["list_cmd"],
-            mgr_config.get("supports_multi_pkgs", False),
-        )
+        kwargs = {}
+
+        for key in ["install_cmd", "remove_cmd", "list_cmd"]:
+            try:
+                kwargs[key] = mgr_config[key]
+            except KeyError:
+                ERROR_EXIT(f"Manager '{mgr_name}' is missing required command '{key}'")
+        kwargs["supports_multi_pkgs"] = mgr_config.get("supports_multi_pkgs", False)
+        if "success_ret_code" in mgr_config:
+            kwargs["success_ret_code"] = set(mgr_config["success_ret_code"])
+
+        pkg_mgr = SimplePackageManager(**kwargs)
         mgrs[mgr_name] = pkg_mgr
+
+    for mgr_name in requested_mgrs:
+        if mgr_name not in mgrs:
+            ERROR_EXIT(f"Manager for '{mgr_name}' not found in {pkg_mgr_config}")
 
     return mgrs
 
@@ -180,11 +183,12 @@ def load_all(config_dir: str = "./configs"):
         ERROR_EXIT(f"Config directory '{config_dir}' does not exist.")
 
     with printer.PKG_CTX:
-        INFO(f"Loading manager definition...")
-        load_user_configs(config_dir)
+        with printer.PKG_CTX("load-conf"):
+            INFO(f"Collecting desire package state in '{config_dir}/'...")
+            load_user_configs(config_dir)
 
-        INFO(f"Collecting desire package state...")
-        managers = load_mgr_config(config_dir, requested_manager.data_pair.keys())
+            INFO(f"Loading manager definition...")
+            managers = load_mgr_config(config_dir, MANAGERS.data_pair.keys())
         return managers
 
 
@@ -233,11 +237,11 @@ async def cmd_save(
     packages_to_write_functor = []
 
     # process all requested managers and see if we need to write anything
-    for requested_mgr in requested_manager.data_pair.values():
-        pkg_mgr = managers[requested_mgr.name]
+    for pkg_mgr_name, pkg_mgr in managers.items():
 
-        with printer.PKG_CTX(requested_mgr.name):
+        with printer.PKG_CTX(pkg_mgr_name):
 
+            requested_mgr = MANAGERS[pkg_mgr_name]
             pkgs_wanted, pkgs_not_recorded = await collect_state(requested_mgr, pkg_mgr)
 
             pkgs_wanted = sorted(pkgs_wanted, key=lambda pkg: pkg.name)
@@ -246,10 +250,10 @@ async def cmd_save(
             if pkgs_wanted or pkgs_not_recorded:
 
                 def functor(file):
-                    IDEN_var_name = santise_variable_name(requested_mgr.name)
+                    IDEN_var_name = santise_variable_name(pkg_mgr_name)
 
                     file.write("\n" + "#" * 25 + "\n")
-                    file.write(f"# {requested_mgr.name}\n")
+                    file.write(f"# {pkg_mgr_name}\n")
                     file.write("#" * 25 + "\n")
 
                     file.write(f'\n{IDEN_var_name} = MANAGERS["{IDEN_var_name}"]\n')
@@ -283,7 +287,7 @@ async def cmd_save(
 
 
 async def cmd_apply(managers: dict[str, PackageManager]) -> None:
-    for requested_mgr in requested_manager.data_pair.values():
+    for requested_mgr in MANAGERS.data_pair.values():
 
         pkg_mgr = managers[requested_mgr.name]
 
