@@ -9,9 +9,13 @@ BLUE = "\033[33m"
 PINK = "\033[95m"
 CYAN = "\033[96m"
 GREY = "\033[90m"
+BROWN = "\033[0;33m"
+BLUE = "\033[0;34m"
+PURPLE = "\033[0;35m"
+LIGHT_BLUE = "\033[0;36m"
+LIGHT_GRAY = "\033[0;37m"
 END = "\033[0m"
 NORMAL = END
-BOLD_PURPLE = "\033[35m"
 UNDERLINE = "\033[4m"
 BOLD = "\033[1m"
 
@@ -63,7 +67,7 @@ def print_prefix(**kw):
     global NEEDS_PREFIX
 
     pkg = PKG_CTX.current_pkg.get()
-    pkg_txt = f"{BLUE}[{pkg}] " if pkg else ""
+    pkg_txt = f"{BROWN}[{pkg}] " if pkg else ""
     # print('33')
     print(f"{GREY}:: {pkg_txt}", **kw, end="")
     sys.stdout.flush()
@@ -108,7 +112,7 @@ def ASK_USER(question: str) -> bool:
     while True:
         print_prefix()
         answer = input(
-            f"{BOLD_PURPLE}{BOLD}> {UNDERLINE}{question}{END} {BOLD_PURPLE}(y/n){BLUE} "
+            f"{PURPLE}{BOLD}> {UNDERLINE}{question}{END} {PURPLE}(y/n){LIGHT_BLUE} "
         ).lower()
         NEEDS_PREFIX = True
         if answer in ["y", "yes"]:

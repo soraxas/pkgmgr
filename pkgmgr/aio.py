@@ -56,6 +56,7 @@ async def command_runner_stream(command: str) -> int:
     Adds a prefix for new lines and detects user input.
     Returns the process return code.
     """
+    printer.INFO(f"{printer.BLUE}${printer.LIGHT_BLUE} {' '.join(command)}")
     process = await asyncio.create_subprocess_exec(
         *command,
         stdin=asyncio.subprocess.PIPE,
