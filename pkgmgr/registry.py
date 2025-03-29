@@ -38,7 +38,7 @@ class Package:
 
 def ensure_package(
     package: Union[str, Package, Iterable[Package]],
-) -> Generator[Package]:
+) -> Generator[Package, None, None]:
     """
     Ensure that the package is a Package instance.
     """
