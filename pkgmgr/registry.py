@@ -22,7 +22,7 @@ class Package:
         self.install_cmd = install_cmd
         self.extra = extra
 
-    def get_part(self):
+    def get_install_cmd_part(self):
         if self.install_cmd:
             return self.install_cmd
         if self.extra:

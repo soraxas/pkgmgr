@@ -86,12 +86,12 @@ class SimplePackageManager(PackageManager):
     async def install(self, packages: list[PackageManager]) -> bool:
         if self.supports_multi_pkgs:
             cmd = self.install_cmd.replace(
-                "{}", " ".join(pkg.get_part() for pkg in packages)
+                "{}", " ".join(pkg.get_install_cmd_part() for pkg in packages)
             )
             return self.check_ret_code(await command_runner_stream(shlex.split(cmd)))
         else:
             for pkg in packages:
-                cmd = self.install_cmd.replace("{}", pkg.name)
+                cmd = self.install_cmd.replace("{}", pkg.get_install_cmd_part())
                 if not self.check_ret_code(
                     await command_runner_stream(shlex.split(cmd))
                 ):
