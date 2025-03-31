@@ -293,7 +293,6 @@ async def cmd_apply(managers: dict[str, PackageManager]) -> None:
     for requested_mgr in MANAGERS.data_pair.values():
 
         pkg_mgr = managers[requested_mgr.name]
-
         with printer.PKG_CTX(requested_mgr.name):
 
             pkgs_wanted, pkgs_not_recorded = await collect_state(requested_mgr, pkg_mgr)
@@ -319,5 +318,25 @@ async def cmd_apply(managers: dict[str, PackageManager]) -> None:
                     ERROR_EXIT("Aborted.")
 
                 INFO(f"Applied.")
+            else:
+                INFO(f"No Change.")
+
+
+async def cmd_diff(managers: dict[str, PackageManager]) -> None:
+    for requested_mgr in MANAGERS.data_pair.values():
+
+        pkg_mgr = managers[requested_mgr.name]
+        with printer.PKG_CTX(requested_mgr.name):
+
+            pkgs_wanted, pkgs_not_recorded = await collect_state(requested_mgr, pkg_mgr)
+
+            if pkgs_wanted or pkgs_not_recorded:
+                INFO("The following changes are detected:")
+
+                for package in pkgs_wanted:
+                    INFO(f"  + {package.name}", GREEN)
+                for package_name in pkgs_not_recorded:
+                    INFO(f"  - {package_name}", RED)
+
             else:
                 INFO(f"No Change.")

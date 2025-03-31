@@ -73,7 +73,7 @@ def main():
             print("Executing 'check' action...")
 
         elif args.command == "diff":
-            print("Executing 'diff' action...")
+            asyncio.run(core.cmd_diff(manager))
 
         INFO("All done.")
     # else:
