@@ -18,7 +18,7 @@ from .printer import (
     GREEN,
     RED,
 )
-from .registry import MANAGERS
+from .registry import MANAGERS, DeclaredPackageManager
 
 DEFAULT_SAVE_OUTPUT_FILE = "99.unsorted.py"
 
@@ -193,7 +193,7 @@ def load_all(config_dir: str = "./configs"):
 
 
 async def collect_state(
-    requested_mgr: PackageManager, pkg_mgr: PackageManager
+    requested_mgr: DeclaredPackageManager, pkg_mgr: PackageManager
 ) -> tuple[set[PackageManager], set[str]]:
     """
     Collect the state of all package managers.
@@ -212,9 +212,11 @@ async def collect_state(
 
     #######################################################
 
-    pkgs_not_recorded = currently_installed_packages - {
-        want_installed.name for want_installed in want_installed
-    }
+    pkgs_not_recorded = (
+        currently_installed_packages
+        - {want_installed.name for want_installed in want_installed}
+        - requested_mgr.ignore_pkgs
+    )
     return pkgs_wanted, pkgs_not_recorded
 
 

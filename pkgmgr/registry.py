@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Generator, Iterable, Optional, Union
+from typing import Generator, Iterable, Optional, Union, Set, List
 from .printer import ERROR_EXIT
 
 
@@ -67,7 +67,8 @@ class DeclaredPackageManager:
     """
 
     name: str
-    pkgs: list[Package]
+    pkgs: List[Package]
+    ignore_pkgs: Set[Package]
 
     def add(
         self, package: Union[str, Package, Iterable[Package]]
@@ -84,6 +85,14 @@ class DeclaredPackageManager:
 
     def __rshift__(self, package_name: str) -> "DeclaredPackageManager":
         return self.remove(package_name)
+
+    def ignore(self, *args) -> "DeclaredPackageManager":
+        """
+        Ignore packages.
+        """
+        for pkg in args:
+            self.ignore_pkgs.add(pkg)
+        return self
 
 
 @dataclass
@@ -102,7 +111,9 @@ class DeclaredPackageManagerRegistry:
             return self.data_pair[item]
         except KeyError:
             pass
-        self.data_pair[item] = DeclaredPackageManager(name=item, pkgs=[])
+        self.data_pair[item] = DeclaredPackageManager(
+            name=item, pkgs=[], ignore_pkgs=set()
+        )
         return self.data_pair[item]
 
 
