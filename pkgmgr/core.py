@@ -18,7 +18,8 @@ from .printer import (
     GREEN,
     RED,
 )
-from .registry import MANAGERS, DeclaredPackageManager
+from .registry import MANAGERS as REQUESTED_MANAGERS
+from .registry import DeclaredPackageManager
 
 DEFAULT_SAVE_OUTPUT_FILE = "99.unsorted.py"
 
@@ -188,7 +189,7 @@ def load_all(config_dir: str = "./configs"):
             load_user_configs(config_dir)
 
             INFO(f"Loading manager definition...")
-            managers = load_mgr_config(config_dir, MANAGERS.data_pair.keys())
+            managers = load_mgr_config(config_dir, REQUESTED_MANAGERS.data_pair.keys())
         return managers
 
 
@@ -250,6 +251,16 @@ def save_wanted_pkgs_to_file(file, pkg_mgr_name, pkgs_wanted, pkgs_not_recorded)
             INFO(f"To remove {pkg_name}")
 
 
+def for_each_registered_mgr(managers: dict[str, PackageManager]):
+    """
+    Helper genrator to loop through defined managers and registered managers.
+    """
+    for pkg_mgr_name, pkg_mgr in managers.items():
+        with printer.PKG_CTX(pkg_mgr_name):
+            requested_mgr = REQUESTED_MANAGERS[pkg_mgr_name]
+            yield pkg_mgr_name, pkg_mgr, requested_mgr
+
+
 async def cmd_save(
     config_dir: pathlib.Path, managers: dict[str, PackageManager]
 ) -> None:
@@ -262,18 +273,14 @@ async def cmd_save(
     packages_to_write = []
 
     # process all requested managers and see if we need to write anything
-    for pkg_mgr_name, pkg_mgr in managers.items():
+    for pkg_mgr_name, pkg_mgr, requested_mgr in for_each_registered_mgr(managers):
+        pkgs_wanted, pkgs_not_recorded = await collect_state(requested_mgr, pkg_mgr)
 
-        with printer.PKG_CTX(pkg_mgr_name):
+        pkgs_wanted = sorted(pkgs_wanted, key=lambda pkg: pkg.name)
+        pkgs_not_recorded = sorted(pkgs_not_recorded)
 
-            requested_mgr = MANAGERS[pkg_mgr_name]
-            pkgs_wanted, pkgs_not_recorded = await collect_state(requested_mgr, pkg_mgr)
-
-            pkgs_wanted = sorted(pkgs_wanted, key=lambda pkg: pkg.name)
-            pkgs_not_recorded = sorted(pkgs_not_recorded)
-
-            if pkgs_wanted or pkgs_not_recorded:
-                packages_to_write.append((pkg_mgr_name, pkgs_wanted, pkgs_not_recorded))
+        if pkgs_wanted or pkgs_not_recorded:
+            packages_to_write.append((pkg_mgr_name, pkgs_wanted, pkgs_not_recorded))
 
     # only start a new file if we have something to write
     if packages_to_write:
@@ -290,53 +297,45 @@ async def cmd_save(
 
 
 async def cmd_apply(managers: dict[str, PackageManager]) -> None:
-    for requested_mgr in MANAGERS.data_pair.values():
+    for _, pkg_mgr, requested_mgr in for_each_registered_mgr(managers):
+        pkgs_wanted, pkgs_not_recorded = await collect_state(requested_mgr, pkg_mgr)
 
-        pkg_mgr = managers[requested_mgr.name]
-        with printer.PKG_CTX(requested_mgr.name):
+        if pkgs_wanted or pkgs_not_recorded:
+            INFO("The following changes to packages will be applied:")
 
-            pkgs_wanted, pkgs_not_recorded = await collect_state(requested_mgr, pkg_mgr)
+            for package in pkgs_wanted:
+                INFO(f"  + {package.name}", GREEN)
+            for package_name in pkgs_not_recorded:
+                INFO(f"  - {package_name}", RED)
 
-            if pkgs_wanted or pkgs_not_recorded:
-                INFO("The following changes to packages will be applied:")
+            if ASK_USER("Do you want to apply the changes?"):
+                if pkgs_wanted:
+                    if not await pkg_mgr.install(pkgs_wanted):
+                        ERROR_EXIT("Failed to install packages.")
 
-                for package in pkgs_wanted:
-                    INFO(f"  + {package.name}", GREEN)
-                for package_name in pkgs_not_recorded:
-                    INFO(f"  - {package_name}", RED)
+                if pkgs_not_recorded:
+                    if not await pkg_mgr.remove(pkgs_not_recorded):
+                        ERROR_EXIT(f"Failed to remove packages.")
 
-                if ASK_USER("Do you want to apply the changes?"):
-                    if pkgs_wanted:
-                        if not await pkg_mgr.install(pkgs_wanted):
-                            ERROR_EXIT("Failed to install packages.")
-
-                    if pkgs_not_recorded:
-                        if not await pkg_mgr.remove(pkgs_not_recorded):
-                            ERROR_EXIT(f"Failed to remove packages.")
-
-                else:
-                    ERROR_EXIT("Aborted.")
-
-                INFO(f"Applied.")
             else:
-                INFO(f"No Change.")
+                ERROR_EXIT("Aborted.")
+
+            INFO(f"Applied.")
+        else:
+            INFO(f"No Change.")
 
 
 async def cmd_diff(managers: dict[str, PackageManager]) -> None:
-    for requested_mgr in MANAGERS.data_pair.values():
+    for _, pkg_mgr, requested_mgr in for_each_registered_mgr(managers):
+        pkgs_wanted, pkgs_not_recorded = await collect_state(requested_mgr, pkg_mgr)
 
-        pkg_mgr = managers[requested_mgr.name]
-        with printer.PKG_CTX(requested_mgr.name):
+        if pkgs_wanted or pkgs_not_recorded:
+            INFO("Diff of current system against the configs:")
 
-            pkgs_wanted, pkgs_not_recorded = await collect_state(requested_mgr, pkg_mgr)
+            for package in pkgs_wanted:
+                INFO(f"  + {package.name}", GREEN)
+            for package_name in pkgs_not_recorded:
+                INFO(f"  - {package_name}", RED)
 
-            if pkgs_wanted or pkgs_not_recorded:
-                INFO("The following changes are detected:")
-
-                for package in pkgs_wanted:
-                    INFO(f"  + {package.name}", GREEN)
-                for package_name in pkgs_not_recorded:
-                    INFO(f"  - {package_name}", RED)
-
-            else:
-                INFO(f"No Change.")
+        else:
+            INFO(f"No Change.")
