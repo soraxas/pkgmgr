@@ -2,14 +2,14 @@ from abc import ABC, abstractmethod
 import subprocess
 import tomllib
 import shlex
-from typing import Iterable, Optional
+from typing import Any, Dict, Iterable, Optional
 import importlib.util
 import pathlib
 import re
 
 from dataclasses import dataclass, field
-from .aio import command_runner_stream
 from . import printer
+from .command import ShellScript
 from .printer import (
     ASK_USER,
     ERROR,
@@ -24,19 +24,19 @@ from .registry import DeclaredPackageManager
 DEFAULT_SAVE_OUTPUT_FILE = "99.unsorted.py"
 
 
-def command_runner(command: list[str]) -> tuple[int, str, str]:
-    """
-    Runs a command and returns the exit code.
-    """
-    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    assert process.stdout is not None
-    assert process.stderr is not None
-    process.wait()
-    return (
-        process.returncode,
-        process.stdout.read().decode(),
-        process.stderr.read().decode(),
-    )
+# def command_runner(command: list[str]) -> tuple[int, str, str]:
+#     """
+#     Runs a command and returns the exit code.
+#     """
+#     process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+#     assert process.stdout is not None
+#     assert process.stderr is not None
+#     process.wait()
+#     return (
+#         process.returncode,
+#         process.stdout.read().decode(),
+#         process.stderr.read().decode(),
+#     )
 
 
 class PackageManager(ABC):
@@ -58,7 +58,7 @@ class PackageManager(ABC):
         pass
 
     @abstractmethod
-    def list_installed(self) -> list[str]:
+    async def list_installed(self) -> list[str]:
         """
         List all installed packages.
         """
@@ -77,43 +77,33 @@ class SimplePackageManager(PackageManager):
     supports_multi_pkgs: bool
     success_ret_code: set[int] = field(default_factory=lambda: {0})
 
-    def check_ret_code(self, retcode: int) -> bool:
-        """
-        Check if the return code is in the success return code set.
-        """
-        return retcode in self.success_ret_code
-
     async def install(self, packages: list[Package]) -> bool:
         if self.supports_multi_pkgs:
             cmd = self.install_cmd.replace(
                 "{}", " ".join(pkg.get_install_cmd_part() for pkg in packages)
             )
-            return self.check_ret_code(await command_runner_stream(shlex.split(cmd)))
+            return await ShellScript(cmd).run()
         else:
             for pkg in packages:
                 cmd = self.install_cmd.replace("{}", pkg.get_install_cmd_part())
-                if not self.check_ret_code(
-                    await command_runner_stream(shlex.split(cmd))
-                ):
+                if not ShellScript(cmd).run():
                     return False
             return True
 
     async def remove(self, package_names: list[str]) -> bool:
         if self.supports_multi_pkgs:
             cmd = self.remove_cmd.replace("{}", " ".join(package_names))
-            return self.check_ret_code(await command_runner_stream(shlex.split(cmd)))
+            return await ShellScript(cmd).run()
         else:
             for pkg_name in package_names:
                 cmd = self.remove_cmd.replace("{}", pkg_name)
-                if not self.check_ret_code(
-                    await command_runner_stream(shlex.split(cmd))
-                ):
+                if not await ShellScript(cmd).run():
                     return False
             return True
 
-    def list_installed(self) -> list[str]:
-        retcode, stdout, stderr = command_runner(shlex.split(self.list_cmd))
-        if retcode != 0:
+    async def list_installed(self) -> list[str]:
+        success, stdout, stderr = await ShellScript(self.list_cmd).run_with_output()
+        if not success:
             ERROR_EXIT(f"Failed to list installed packages: {stderr}")
         return stdout.splitlines()
 
@@ -155,18 +145,27 @@ def load_mgr_config(
     mgrs: dict[str, PackageManager] = {}
     for mgr_name, mgr_config in managers_conf.items():
 
-        kwargs = {}
+        kwargs: Dict[str, Any] = {}
 
         for key in ["install_cmd", "remove_cmd", "list_cmd"]:
             try:
-                kwargs[key] = mgr_config[key]
+                cmd = mgr_config[key]
+                if isinstance(cmd, str):
+                    kwargs[key] = cmd
+                elif isinstance(cmd, dict):
+                    if "py_func_name" in cmd:
+                        kwargs[key] = cmd["cmd"]
+                    else:
+                        ERROR_EXIT(
+                            f"Manager '{mgr_name}' is missing required command '{key}'"
+                        )
             except KeyError:
                 ERROR_EXIT(f"Manager '{mgr_name}' is missing required command '{key}'")
         kwargs["supports_multi_pkgs"] = mgr_config.get("supports_multi_pkgs", False)
         if "success_ret_code" in mgr_config:
             kwargs["success_ret_code"] = set(mgr_config["success_ret_code"])
 
-        pkg_mgr = SimplePackageManager(**kwargs)
+        pkg_mgr = SimplePackageManager(**kwargs)  # type: ignore
         mgrs[mgr_name] = pkg_mgr
 
     for mgr_name in requested_mgrs:
@@ -200,7 +199,7 @@ async def collect_state(
     INFO(f"Checking packages state...")
 
     want_installed = requested_mgr.pkgs
-    currently_installed_packages = set(pkg_mgr.list_installed())
+    currently_installed_packages = set(await pkg_mgr.list_installed())
 
     #######################################################
 

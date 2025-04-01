@@ -1,16 +1,24 @@
 import asyncio
 import sys
+from io import StringIO
+from typing import Optional, Tuple
+
 
 from . import printer
 from .printer import TERM_STDERR, TERM_STDOUT
 
 
-async def stream_output(stream: asyncio.StreamReader, suffix: str, print_func):
+async def stream_output(
+    stream: asyncio.StreamReader, suffix: str, print_func, additional_output=None
+):
     """Reads output from a stream character-by-character, detects newlines, and request a prefix when so."""
 
     with printer.PKG_CTX(suffix):
         while not stream.at_eof():
             char = (await stream.read(1)).decode()
+
+            if additional_output:
+                additional_output.write(char)
 
             if char:
                 # if we needs prefix now, print it.
@@ -49,7 +57,12 @@ async def handle_input(writer: asyncio.StreamWriter):
         await writer.drain()
 
 
-async def command_runner_stream(command: list[str]) -> int:
+async def command_runner_stream(
+    command: list[str],
+    show_output: bool = True,
+    stdout_capture=None,
+    stderr_capture=None,
+) -> int:
     """
     Runs a command given as a list of strings and prints stdout in green and stderr in red in real-time.
     Adds a prefix for new lines and detects user input.
@@ -62,14 +75,23 @@ async def command_runner_stream(command: list[str]) -> int:
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
+
     tasks = []
     if process.stdout:
         tasks.append(
-            asyncio.create_task(stream_output(process.stdout, ">&1", TERM_STDOUT))
+            asyncio.create_task(
+                stream_output(
+                    process.stdout, ">&1", TERM_STDOUT, additional_output=stdout_capture
+                )
+            )
         )
     if process.stderr:
         tasks.append(
-            asyncio.create_task(stream_output(process.stderr, ">&2", TERM_STDOUT))
+            asyncio.create_task(
+                stream_output(
+                    process.stderr, ">&2", TERM_STDOUT, additional_output=stderr_capture
+                )
+            )
         )
     if process.stdin:
         input_task = asyncio.create_task(handle_input(process.stdin))
@@ -83,5 +105,19 @@ async def command_runner_stream(command: list[str]) -> int:
 
     await asyncio.wait(tasks)
 
-    # print(f"Process exited with return code: {return_code}")
     return return_code
+
+
+async def command_runner_stream_with_output(
+    command: list[str],
+    show_output: bool = True,
+) -> Tuple[int, str, str]:
+    stdout = StringIO()
+    stderr = StringIO()
+    ret_code = await command_runner_stream(
+        command,
+        show_output=show_output,
+        stdout_capture=stdout,
+        stderr_capture=stderr,
+    )
+    return ret_code, stdout.getvalue(), stderr.getvalue()
