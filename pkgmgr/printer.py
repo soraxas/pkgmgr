@@ -29,7 +29,7 @@ class PackageContext:
     """
 
     def __init__(self):
-        self.current_pkg: Optional[str] = ContextVar("current_pkg", default=None)
+        self.current_pkg: ContextVar = ContextVar("current_pkg", default=None)
         self.current_pkg_tokens = []
 
         # self.current_pkg: Optional[str] = None
@@ -74,7 +74,7 @@ def print_prefix(**kw):
     NEEDS_PREFIX = False
 
 
-def my_print(text: str, color: str, end="\n", **kw) -> None:
+def my_print(text: str, color: str, end="\n", **kw):
     global NEEDS_PREFIX
     if NEEDS_PREFIX:
         print_prefix()
@@ -86,15 +86,15 @@ def TERM_STDOUT(text: str, **kw):
     my_print(text, NORMAL, **kw)
 
 
-def TERM_STDERR(text: str, **kw) -> str:
+def TERM_STDERR(text: str, **kw):
     my_print(text, PINK, **kw, file=sys.stderr)
 
 
-def INFO(text: str, color=CYAN) -> None:
+def INFO(text: str, color=CYAN):
     my_print(text, color)
 
 
-def ERROR(text: str) -> None:
+def ERROR(text: str):
     my_print(text, RED, file=sys.stderr)
 
 

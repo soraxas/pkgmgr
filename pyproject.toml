@@ -37,7 +37,7 @@ omit = [
 ]
 
 [tool.mypy]
-plugins = ["pydantic.mypy"]
+plugins = []
 
 [tool.pytest.ini_options]
 asyncio_default_fixture_loop_scope = "function"

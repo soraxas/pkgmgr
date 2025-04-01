@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 import subprocess
 import tomllib
 import shlex
-from typing import Optional
+from typing import Iterable, Optional
 import importlib.util
 import pathlib
 import re
@@ -18,7 +18,7 @@ from .printer import (
     GREEN,
     RED,
 )
-from .registry import MANAGERS as REQUESTED_MANAGERS
+from .registry import MANAGERS as REQUESTED_MANAGERS, Package
 from .registry import DeclaredPackageManager
 
 DEFAULT_SAVE_OUTPUT_FILE = "99.unsorted.py"
@@ -29,8 +29,14 @@ def command_runner(command: list[str]) -> tuple[int, str, str]:
     Runs a command and returns the exit code.
     """
     process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    assert process.stdout is not None
+    assert process.stderr is not None
     process.wait()
-    return process.returncode, process.stdout.read(), process.stderr.read()
+    return (
+        process.returncode,
+        process.stdout.read().decode(),
+        process.stderr.read().decode(),
+    )
 
 
 class PackageManager(ABC):
@@ -38,23 +44,16 @@ class PackageManager(ABC):
     SUPPORTS_MULTIPLE_INSTALLS = True
 
     @abstractmethod
-    async def install(self, package_name: str) -> bool:
+    async def install(self, packages: list[Package]) -> bool:
         """
         Given a package name, install the package.
         """
         pass
 
     @abstractmethod
-    async def remove(self, package_name: str) -> bool:
+    async def remove(self, package_names: list[str]) -> bool:
         """
         Given a package name, remove the package.
-        """
-        pass
-
-    @abstractmethod
-    def check_installed(self, package_name: str) -> bool:
-        """
-        Given a package name, check if the package is installed.
         """
         pass
 
@@ -84,7 +83,7 @@ class SimplePackageManager(PackageManager):
         """
         return retcode in self.success_ret_code
 
-    async def install(self, packages: list[PackageManager]) -> bool:
+    async def install(self, packages: list[Package]) -> bool:
         if self.supports_multi_pkgs:
             cmd = self.install_cmd.replace(
                 "{}", " ".join(pkg.get_install_cmd_part() for pkg in packages)
@@ -112,14 +111,11 @@ class SimplePackageManager(PackageManager):
                     return False
             return True
 
-    def check_installed(self, package_name: str) -> bool:
-        return package_name in self.installed
-
     def list_installed(self) -> list[str]:
         retcode, stdout, stderr = command_runner(shlex.split(self.list_cmd))
         if retcode != 0:
             ERROR_EXIT(f"Failed to list installed packages: {stderr}")
-        return stdout.decode().splitlines()
+        return stdout.splitlines()
 
 
 def load_user_configs(config_dir: pathlib.Path) -> None:
@@ -131,12 +127,14 @@ def load_user_configs(config_dir: pathlib.Path) -> None:
         for file in sorted(config_dir.glob("*.py")):
             INFO(f"Sourcing '{file}'...")
             spec = importlib.util.spec_from_file_location(file.name, file)
+            assert spec is not None
             module = importlib.util.module_from_spec(spec)
+            assert spec.loader is not None
             spec.loader.exec_module(module)
 
 
 def load_mgr_config(
-    config_dir: pathlib.Path, requested_mgrs: list[str]
+    config_dir: pathlib.Path, requested_mgrs: Iterable[str]
 ) -> dict[str, PackageManager]:
     """
     Load package manager config from the config directory.
@@ -154,7 +152,7 @@ def load_mgr_config(
             ERROR("No package managers found in config.toml")
             exit(1)
 
-    mgrs = {}
+    mgrs: dict[str, PackageManager] = {}
     for mgr_name, mgr_config in managers_conf.items():
 
         kwargs = {}
@@ -178,8 +176,8 @@ def load_mgr_config(
     return mgrs
 
 
-def load_all(config_dir: str = "./configs"):
-    config_dir = pathlib.Path(config_dir)
+def load_all(config_dir_str: str = "./configs"):
+    config_dir = pathlib.Path(config_dir_str)
     if not config_dir.is_dir():
         ERROR_EXIT(f"Config directory '{config_dir}' does not exist.")
 
@@ -195,7 +193,7 @@ def load_all(config_dir: str = "./configs"):
 
 async def collect_state(
     requested_mgr: DeclaredPackageManager, pkg_mgr: PackageManager
-) -> tuple[set[PackageManager], set[str]]:
+) -> tuple[set[Package], set[str]]:
     """
     Collect the state of all package managers.
     """
@@ -274,10 +272,12 @@ async def cmd_save(
 
     # process all requested managers and see if we need to write anything
     for pkg_mgr_name, pkg_mgr, requested_mgr in for_each_registered_mgr(managers):
-        pkgs_wanted, pkgs_not_recorded = await collect_state(requested_mgr, pkg_mgr)
+        pkgs_wanted_set, pkgs_not_recorded_set = await collect_state(
+            requested_mgr, pkg_mgr
+        )
 
-        pkgs_wanted = sorted(pkgs_wanted, key=lambda pkg: pkg.name)
-        pkgs_not_recorded = sorted(pkgs_not_recorded)
+        pkgs_wanted = sorted(pkgs_wanted_set, key=lambda pkg: pkg.name)
+        pkgs_not_recorded = sorted(pkgs_not_recorded_set)
 
         if pkgs_wanted or pkgs_not_recorded:
             packages_to_write.append((pkg_mgr_name, pkgs_wanted, pkgs_not_recorded))

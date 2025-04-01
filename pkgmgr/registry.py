@@ -68,7 +68,7 @@ class DeclaredPackageManager:
 
     name: str
     pkgs: List[Package]
-    ignore_pkgs: Set[Package]
+    ignore_pkgs: Set[str]
 
     def add(
         self, package: Union[str, Package, Iterable[Package]]
@@ -86,7 +86,7 @@ class DeclaredPackageManager:
     def __rshift__(self, package_name: str) -> "DeclaredPackageManager":
         return self.remove(package_name)
 
-    def ignore(self, *args) -> "DeclaredPackageManager":
+    def ignore(self, *args: str) -> "DeclaredPackageManager":
         """
         Ignore packages.
         """
