@@ -71,7 +71,8 @@ async def command_runner_stream(
     printer.INFO(f"{printer.BLUE}${printer.LIGHT_BLUE} {' '.join(command)}")
     process = await asyncio.create_subprocess_exec(
         *command,
-        stdin=asyncio.subprocess.PIPE,
+        # Investigate if the following line (stdin) is needed
+        # stdin=asyncio.subprocess.PIPE,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )

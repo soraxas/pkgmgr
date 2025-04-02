@@ -9,7 +9,7 @@ import re
 
 from dataclasses import dataclass, field
 from . import printer
-from .command import ShellScript
+from .command import Command, ShellScript
 from .printer import (
     ASK_USER,
     ERROR,
@@ -18,8 +18,12 @@ from .printer import (
     GREEN,
     RED,
 )
-from .registry import MANAGERS as REQUESTED_MANAGERS, Package
-from .registry import DeclaredPackageManager
+from .registry import (
+    MANAGERS as REQUESTED_MANAGERS,
+    Package,
+    DeclaredPackageManager,
+    USER_EXPORT,
+)
 
 DEFAULT_SAVE_OUTPUT_FILE = "99.unsorted.py"
 
@@ -65,44 +69,60 @@ class PackageManager(ABC):
         pass
 
 
+from collections.abc import AsyncIterable
+
+
+async def async_all(async_iterable: AsyncIterable[object]) -> bool:
+    async for element in async_iterable:
+        if not element:
+            return False
+    return True
+
+
 @dataclass
 class SimplePackageManager(PackageManager):
     """
     A simple package manager class that uses shell commands to install and remove packages.
     """
 
-    install_cmd: str
-    remove_cmd: str
-    list_cmd: str
+    install_cmd: Command
+    remove_cmd: Command
+    list_cmd: Command
     supports_multi_pkgs: bool
     success_ret_code: set[int] = field(default_factory=lambda: {0})
 
     async def install(self, packages: list[Package]) -> bool:
+        # collect all the install commands, depending on
+        # if the package manager supports multiple installs in one command
         if self.supports_multi_pkgs:
-            cmd = self.install_cmd.replace(
-                "{}", " ".join(pkg.get_install_cmd_part() for pkg in packages)
-            )
-            return await ShellScript(cmd).run()
+            install_cmd_parts = [
+                " ".join(pkg.get_install_cmd_part() for pkg in packages)
+            ]
         else:
-            for pkg in packages:
-                cmd = self.install_cmd.replace("{}", pkg.get_install_cmd_part())
-                if not ShellScript(cmd).run():
-                    return False
-            return True
+            install_cmd_parts = [pkg.get_install_cmd_part() for pkg in packages]
+
+        # run the install commands
+        return await async_all(
+            await self.install_cmd.with_replacement_part(install_cmd_part).run()
+            for install_cmd_part in install_cmd_parts
+        )
 
     async def remove(self, package_names: list[str]) -> bool:
+        # collect all the remove commands, depending on
+        # if the package manager supports multiple removes in one command
         if self.supports_multi_pkgs:
-            cmd = self.remove_cmd.replace("{}", " ".join(package_names))
-            return await ShellScript(cmd).run()
+            remove_cmd_parts = [" ".join(pkg for pkg in package_names)]
         else:
-            for pkg_name in package_names:
-                cmd = self.remove_cmd.replace("{}", pkg_name)
-                if not await ShellScript(cmd).run():
-                    return False
-            return True
+            remove_cmd_parts = [pkg for pkg in package_names]
+
+        # run the remove commands
+        return await async_all(
+            await self.remove_cmd.with_replacement_part(remove_cmd_part).run()
+            for remove_cmd_part in remove_cmd_parts
+        )
 
     async def list_installed(self) -> list[str]:
-        success, stdout, stderr = await ShellScript(self.list_cmd).run_with_output()
+        success, stdout, stderr = await self.list_cmd.run_with_output()
         if not success:
             ERROR_EXIT(f"Failed to list installed packages: {stderr}")
         return stdout.splitlines()
@@ -151,10 +171,21 @@ def load_mgr_config(
             try:
                 cmd = mgr_config[key]
                 if isinstance(cmd, str):
-                    kwargs[key] = cmd
+                    kwargs[key] = ShellScript(cmd)
                 elif isinstance(cmd, dict):
                     if "py_func_name" in cmd:
-                        kwargs[key] = cmd["cmd"]
+                        try:
+                            func = USER_EXPORT[cmd["py_func_name"]]
+                        except KeyError:
+                            ERROR_EXIT(
+                                f"The specified functino '{cmd['py_func_name']}' is not exported from the module. "
+                                f"You can export it by the decorator '@export' in the module. E.g.:\n\n"
+                                f"from pkgmgr.registry import export\n\n"
+                                f"@export\n"
+                                f"def {cmd['py_func_name']}():\n"
+                                f"    pass\n"
+                            )
+                        kwargs[key] = func
                     else:
                         ERROR_EXIT(
                             f"Manager '{mgr_name}' is missing required command '{key}'"
@@ -296,6 +327,7 @@ async def cmd_save(
 
 
 async def cmd_apply(managers: dict[str, PackageManager]) -> None:
+
     for _, pkg_mgr, requested_mgr in for_each_registered_mgr(managers):
         pkgs_wanted, pkgs_not_recorded = await collect_state(requested_mgr, pkg_mgr)
 

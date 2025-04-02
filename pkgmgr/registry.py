@@ -2,6 +2,27 @@ from dataclasses import dataclass
 from typing import Generator, Iterable, Optional, Union, Set, List
 from .printer import ERROR_EXIT
 
+USER_EXPORT = {}
+
+
+def export(function):
+    """
+    Allow user to export a function to be used in the package manager.
+
+    Example:
+    ```
+    from pkgmgr.registry import export
+
+    @export
+    def my_function():
+        pass
+    ```
+    """
+    if not callable(function):
+        raise TypeError("export() requires a callable")
+
+    USER_EXPORT[function.__name__] = function
+
 
 class Package:
     """
