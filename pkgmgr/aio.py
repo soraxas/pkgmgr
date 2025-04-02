@@ -9,7 +9,11 @@ from .printer import TERM_STDERR, TERM_STDOUT
 
 
 async def stream_output(
-    stream: asyncio.StreamReader, suffix: str, print_func, additional_output=None
+    stream: asyncio.StreamReader,
+    suffix: str,
+    print_func,
+    additional_output=None,
+    show_output: bool = True,
 ):
     """Reads output from a stream character-by-character, detects newlines, and request a prefix when so."""
 
@@ -20,7 +24,7 @@ async def stream_output(
             if additional_output:
                 additional_output.write(char)
 
-            if char:
+            if show_output and char:
                 # if we needs prefix now, print it.
                 if printer.NEEDS_PREFIX:
                     print_func(f"", end="")
@@ -82,7 +86,11 @@ async def command_runner_stream(
         tasks.append(
             asyncio.create_task(
                 stream_output(
-                    process.stdout, ">&1", TERM_STDOUT, additional_output=stdout_capture
+                    process.stdout,
+                    ">&1",
+                    TERM_STDOUT,
+                    additional_output=stdout_capture,
+                    show_output=show_output,
                 )
             )
         )
@@ -90,7 +98,11 @@ async def command_runner_stream(
         tasks.append(
             asyncio.create_task(
                 stream_output(
-                    process.stderr, ">&2", TERM_STDOUT, additional_output=stderr_capture
+                    process.stderr,
+                    ">&2",
+                    TERM_STDOUT,
+                    additional_output=stderr_capture,
+                    show_output=show_output,
                 )
             )
         )
@@ -111,7 +123,7 @@ async def command_runner_stream(
 
 async def command_runner_stream_with_output(
     command: list[str],
-    show_output: bool = True,
+    show_output: bool = False,
 ) -> Tuple[int, str, str]:
     stdout = StringIO()
     stderr = StringIO()

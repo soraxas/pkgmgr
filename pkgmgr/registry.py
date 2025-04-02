@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from typing import Generator, Iterable, Optional, Union, Set, List
 from .printer import ERROR_EXIT
 
@@ -24,24 +24,21 @@ def export(function):
     USER_EXPORT[function.__name__] = function
 
 
+@dataclass
 class Package:
     """
     A class that represents a package.
     If install_cmd_part is None, it is assumed that the package is installed via its own name.
     """
 
-    def __init__(
-        self,
-        name: str,
-        *,
-        install_cmd: Optional[str] = None,
-        extra: Optional[str] = None,
-    ):
-        if install_cmd and extra:
+    name: str
+    install_cmd: Optional[str] = None
+    extra: Optional[str] = None
+    metadata: Optional[dict] = None
+
+    def __post_init__(self):
+        if self.install_cmd and self.extra:
             raise ValueError("Cannot have both install_cmd and extra")
-        self.name = name
-        self.install_cmd = install_cmd
-        self.extra = extra
 
     def get_install_cmd_part(self):
         if self.install_cmd:
@@ -50,11 +47,53 @@ class Package:
             return f"{self.name} {self.extra}"
         return self.name
 
+    def __lt__(self, other):
+        return self.name < other.name
+
+    @property
+    def equality_key(self):
+        """
+        A key that can be used to compare two packages.
+        """
+        # return (self.name, self.install_cmd, self.extra)
+        return self.name
+
+    @property
+    def is_unit(self):
+        """
+        Check if the package is a unit.
+        """
+        return self.install_cmd is None and self.extra is None
+
+    def __eq__(self, other):
+        if isinstance(other, Package):
+            return self.equality_key == other.equality_key
+        elif isinstance(other, str) and self.is_unit:
+            # If the other is a string and the package is a unit, we can compare by name
+            return self.name == other
+        raise NotImplementedError(f"Cannot compare Package with {type(other)}.")
+
     def __hash__(self):
-        return hash(self.name)
+        return hash(self.equality_key)
 
     def __repr__(self):
-        return f"Package({self.name})"
+        if self.is_unit:
+            # Only the name is present, so we return just the name
+            return self.name
+        # Otherwise, we return the full representation
+        # Automatically collect non-None and non-empty fields
+
+        field_strs = [f"{self.name!r}"]
+
+        field_strs.extend(
+            [
+                f"{f.name}={repr(getattr(self, f.name))}"
+                for f in fields(self)
+                if f.name != "name" and getattr(self, f.name) is not None
+            ]
+        )
+
+        return f"Package({', '.join(field_strs)})"
 
 
 def ensure_package(
@@ -89,7 +128,7 @@ class DeclaredPackageManager:
 
     name: str
     pkgs: List[Package]
-    ignore_pkgs: Set[str]
+    ignore_pkgs: Set[Package]
 
     def add(
         self, package: Union[str, Package, Iterable[Package]]
@@ -112,7 +151,7 @@ class DeclaredPackageManager:
         Ignore packages.
         """
         for pkg in args:
-            self.ignore_pkgs.add(pkg)
+            self.ignore_pkgs.add(Package(pkg))
         return self
 
 

@@ -125,7 +125,9 @@ class SimplePackageManager(PackageManager):
         success, stdout, stderr = await self.list_cmd.run_with_output()
         if not success:
             ERROR_EXIT(f"Failed to list installed packages: {stderr}")
-        return stdout.splitlines()
+        if isinstance(stdout, str):
+            return stdout.splitlines()
+        return stdout
 
 
 def load_user_configs(config_dir: pathlib.Path) -> None:
@@ -223,28 +225,29 @@ def load_all(config_dir_str: str = "./configs"):
 
 async def collect_state(
     requested_mgr: DeclaredPackageManager, pkg_mgr: PackageManager
-) -> tuple[set[Package], set[str]]:
+) -> tuple[set[Package], set[Package]]:
     """
     Collect the state of all package managers.
     """
     INFO(f"Checking packages state...")
 
     want_installed = requested_mgr.pkgs
-    currently_installed_packages = set(await pkg_mgr.list_installed())
+    currently_installed_packages = set(
+        Package(pkg) if isinstance(pkg, str) else pkg
+        for pkg in (await pkg_mgr.list_installed())
+    )
 
     #######################################################
 
     pkgs_wanted = set()
     for package in want_installed:
-        if package.name not in currently_installed_packages:
+        if package not in currently_installed_packages:
             pkgs_wanted.add(package)
 
     #######################################################
 
     pkgs_not_recorded = (
-        currently_installed_packages
-        - {want_installed.name for want_installed in want_installed}
-        - requested_mgr.ignore_pkgs
+        currently_installed_packages - set(want_installed) - requested_mgr.ignore_pkgs
     )
     return pkgs_wanted, pkgs_not_recorded
 
@@ -270,12 +273,12 @@ def save_wanted_pkgs_to_file(file, pkg_mgr_name, pkgs_wanted, pkgs_not_recorded)
     if pkgs_not_recorded:
         file.write(f"\n# wanted\n")
         for pkg_name in pkgs_not_recorded:
-            file.write(f'{IDEN_var_name} << "{pkg_name}"\n')
+            file.write(f"{IDEN_var_name} << {pkg_name!r}\n")
             INFO(f"Added {pkg_name}")
     if pkgs_wanted:
         file.write(f"\n# unwanted\n")
         for pkg in pkgs_wanted:
-            file.write(f'{IDEN_var_name} >> "{pkg.name}"\n')
+            file.write(f"{IDEN_var_name} >> {pkg.name!r}\n")
             INFO(f"To remove {pkg_name}")
 
 
@@ -335,7 +338,7 @@ async def cmd_apply(managers: dict[str, PackageManager]) -> None:
             INFO("The following changes to packages will be applied:")
 
             for package in pkgs_wanted:
-                INFO(f"  + {package.name}", GREEN)
+                INFO(f"  + {package}", GREEN)
             for package_name in pkgs_not_recorded:
                 INFO(f"  - {package_name}", RED)
 
@@ -364,7 +367,7 @@ async def cmd_diff(managers: dict[str, PackageManager]) -> None:
             INFO("Diff of current system against the configs:")
 
             for package in pkgs_wanted:
-                INFO(f"  + {package.name}", GREEN)
+                INFO(f"  + {package}", GREEN)
             for package_name in pkgs_not_recorded:
                 INFO(f"  - {package_name}", RED)
 
