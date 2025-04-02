@@ -9,7 +9,7 @@ import re
 
 from dataclasses import dataclass, field
 from . import printer
-from .command import Command, ShellScript
+from .command import Command, FunctionCommand, ShellScript
 from .printer import (
     ASK_USER,
     ERROR,
@@ -175,7 +175,7 @@ def load_mgr_config(
                 elif isinstance(cmd, dict):
                     if "py_func_name" in cmd:
                         try:
-                            func = USER_EXPORT[cmd["py_func_name"]]
+                            func = FunctionCommand(USER_EXPORT[cmd["py_func_name"]])
                         except KeyError:
                             ERROR_EXIT(
                                 f"The specified functino '{cmd['py_func_name']}' is not exported from the module. "

@@ -2,7 +2,11 @@ from abc import abstractmethod
 import shlex
 from typing import Optional, Tuple, Union, Callable, List
 from dataclasses import dataclass, field
+import inspect
+import traceback
 
+
+from pkgmgr.printer import ERROR_EXIT
 
 from .aio import command_runner_stream, command_runner_stream_with_output
 
@@ -74,3 +78,25 @@ class ShellScript(Command):
             )
         self._modified_script = self.script.replace("{}", part)
         return self
+
+
+class FunctionCommand(Command):
+
+    def __init__(self, functor: Callable[[], CommandResult]):
+        self.functor = functor
+
+    async def run(self) -> bool:
+        return (await self.run_with_output())[0]
+
+    async def run_with_output(self) -> CommandResult:
+        try:
+            if inspect.iscoroutinefunction(self.functor):
+                return await self.functor()
+            else:
+                return self.functor()
+        except Exception as e:
+
+            ERROR_EXIT(
+                f"Error while executing function {self.functor.__name__}: {traceback.format_exc()}"
+            )
+            raise e
