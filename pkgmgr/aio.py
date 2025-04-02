@@ -18,8 +18,20 @@ async def stream_output(
     """Reads output from a stream character-by-character, detects newlines, and request a prefix when so."""
 
     with printer.PKG_CTX(suffix):
+        _char_buffer = bytearray()
         while not stream.at_eof():
-            char = (await stream.read(1)).decode()
+            _byte = await stream.read(1)  # Read one byte at a time
+            if not _byte:  # End of stream
+                break
+
+            _char_buffer.append(_byte[0])  # Append byte to buffer
+
+            try:
+                char = _char_buffer.decode()  # Try decoding the accumulated bytes
+                _char_buffer.clear()  # Clear buffer on successful decode
+            except UnicodeDecodeError:
+                # Handle non-decodable characters
+                continue
 
             if additional_output:
                 additional_output.write(char)

@@ -55,7 +55,7 @@ class PackageManager(ABC):
         pass
 
     @abstractmethod
-    async def remove(self, package_names: list[str]) -> bool:
+    async def remove(self, package: list[Package]) -> bool:
         """
         Given a package name, remove the package.
         """
@@ -107,13 +107,13 @@ class SimplePackageManager(PackageManager):
             for install_cmd_part in install_cmd_parts
         )
 
-    async def remove(self, package_names: list[str]) -> bool:
+    async def remove(self, package: list[Package]) -> bool:
         # collect all the remove commands, depending on
         # if the package manager supports multiple removes in one command
         if self.supports_multi_pkgs:
-            remove_cmd_parts = [" ".join(pkg for pkg in package_names)]
+            remove_cmd_parts = [" ".join(pkg.name for pkg in package)]
         else:
-            remove_cmd_parts = [pkg for pkg in package_names]
+            remove_cmd_parts = [pkg.name for pkg in package]
 
         # run the remove commands
         return await async_all(
