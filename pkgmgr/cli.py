@@ -45,6 +45,12 @@ def main():
         action="store_true",
         help="Show progress with additional detail",
     )
+    parser.add_argument(
+        "-f",
+        "--force",
+        action="store_true",
+        help="Allow overwriting existing files",
+    )
 
     parser.add_argument(
         "command",
@@ -64,7 +70,7 @@ def main():
         INFO(f"Executing {args.command}...")
 
         if args.command == "save":
-            asyncio.run(core.cmd_save(args.config_dir, manager))
+            asyncio.run(core.cmd_save(args.config_dir, manager, args))
 
         elif args.command == "apply":
             asyncio.run(core.cmd_apply(manager))

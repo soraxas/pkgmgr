@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from argparse import Namespace
 import subprocess
 import tomllib
 import shlex
@@ -224,7 +225,7 @@ def load_all(config_dir_str: str = "./configs"):
 
 
 async def collect_state(
-    requested_mgr: DeclaredPackageManager, pkg_mgr: PackageManager
+    requested_mgr: DeclaredPackageManager, pkg_mgr: PackageManager, sort: bool = True
 ) -> tuple[set[Package], set[Package]]:
     """
     Collect the state of all package managers.
@@ -249,6 +250,11 @@ async def collect_state(
     pkgs_not_recorded = (
         currently_installed_packages - set(want_installed) - requested_mgr.ignore_pkgs
     )
+
+    if sort:
+        pkgs_wanted = set(sorted(pkgs_wanted))
+        pkgs_not_recorded = set(sorted(pkgs_not_recorded))
+
     return pkgs_wanted, pkgs_not_recorded
 
 
@@ -273,13 +279,13 @@ def save_wanted_pkgs_to_file(file, pkg_mgr_name, pkgs_wanted, pkgs_not_recorded)
     if pkgs_not_recorded:
         file.write(f"\n# wanted\n")
         for pkg_name in pkgs_not_recorded:
-            file.write(f"{IDEN_var_name} << {pkg_name!r}\n")
+            file.write(f"{IDEN_var_name} << {pkg_name.get_config_repr()}\n")
             INFO(f"Added {pkg_name}")
     if pkgs_wanted:
         file.write(f"\n# unwanted\n")
         for pkg in pkgs_wanted:
             file.write(f"{IDEN_var_name} >> {pkg.name!r}\n")
-            INFO(f"To remove {pkg_name}")
+            INFO(f"To remove {pkg!r}")
 
 
 def for_each_registered_mgr(managers: dict[str, PackageManager]):
@@ -293,9 +299,9 @@ def for_each_registered_mgr(managers: dict[str, PackageManager]):
 
 
 async def cmd_save(
-    config_dir: pathlib.Path, managers: dict[str, PackageManager]
+    config_dir: pathlib.Path, managers: dict[str, PackageManager], args: Namespace
 ) -> None:
-    if (config_dir / DEFAULT_SAVE_OUTPUT_FILE).is_file():
+    if not args.force and (config_dir / DEFAULT_SAVE_OUTPUT_FILE).is_file():
         ERROR_EXIT(
             f"File '{DEFAULT_SAVE_OUTPUT_FILE}' already exists. Refusing to continue. "
             "Please organise your packages definition in the config directory first."
@@ -305,12 +311,7 @@ async def cmd_save(
 
     # process all requested managers and see if we need to write anything
     for pkg_mgr_name, pkg_mgr, requested_mgr in for_each_registered_mgr(managers):
-        pkgs_wanted_set, pkgs_not_recorded_set = await collect_state(
-            requested_mgr, pkg_mgr
-        )
-
-        pkgs_wanted = sorted(pkgs_wanted_set, key=lambda pkg: pkg.name)
-        pkgs_not_recorded = sorted(pkgs_not_recorded_set)
+        pkgs_wanted, pkgs_not_recorded = await collect_state(requested_mgr, pkg_mgr)
 
         if pkgs_wanted or pkgs_not_recorded:
             packages_to_write.append((pkg_mgr_name, pkgs_wanted, pkgs_not_recorded))
@@ -325,8 +326,8 @@ async def cmd_save(
 
             f.write("from pkgmgr.registry import MANAGERS, Package\n\n")
 
-            for args in packages_to_write:
-                save_wanted_pkgs_to_file(f, *args)
+            for datapack in packages_to_write:
+                save_wanted_pkgs_to_file(f, *datapack)
 
 
 async def cmd_apply(managers: dict[str, PackageManager]) -> None:

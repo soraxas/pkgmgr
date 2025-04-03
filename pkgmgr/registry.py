@@ -22,6 +22,7 @@ def export(function):
         raise TypeError("export() requires a callable")
 
     USER_EXPORT[function.__name__] = function
+    return function
 
 
 @dataclass
@@ -63,7 +64,7 @@ class Package:
         """
         Check if the package is a unit.
         """
-        return self.install_cmd is None and self.extra is None
+        return self.install_cmd is None and self.extra is None and not self.metadata
 
     def __eq__(self, other):
         if isinstance(other, Package):
@@ -76,13 +77,20 @@ class Package:
     def __hash__(self):
         return hash(self.equality_key)
 
-    def __repr__(self):
+    def get_config_repr(self):
+        """
+        Get a string representation of the package for configuration.
+        """
+        if self.is_unit:
+            return f"{self.name!r}"
+        return self
+
+    def __str__(self):
         if self.is_unit:
             # Only the name is present, so we return just the name
             return self.name
-        # Otherwise, we return the full representation
-        # Automatically collect non-None and non-empty fields
 
+        # Automatically collect non-None and non-empty fields
         field_strs = [f"{self.name!r}"]
 
         field_strs.extend(
