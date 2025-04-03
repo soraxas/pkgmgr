@@ -94,6 +94,10 @@ def INFO(text: str, color=CYAN):
     my_print(text, color)
 
 
+def WARN(text: str, color=PINK):
+    my_print(text, color)
+
+
 def ERROR(text: str):
     my_print(text, RED, file=sys.stderr)
 

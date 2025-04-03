@@ -1,6 +1,6 @@
 from dataclasses import dataclass, fields
 from typing import Generator, Iterable, Optional, Union, Set, List
-from .printer import ERROR_EXIT
+from .printer import ERROR_EXIT, WARN
 
 USER_EXPORT = {}
 
@@ -49,7 +49,7 @@ class Package:
         return self.name
 
     def __lt__(self, other):
-        return self.name < other.name
+        return self.equality_key < other.equality_key
 
     @property
     def equality_key(self):
@@ -135,24 +135,38 @@ class DeclaredPackageManager:
     """
 
     name: str
-    pkgs: List[Package]
+    pkgs: Set[Package]
     ignore_pkgs: Set[Package]
 
     def add(
         self, package: Union[str, Package, Iterable[Package]]
     ) -> "DeclaredPackageManager":
-        self.pkgs.extend(ensure_package(package))
+        for pkg in ensure_package(package):
+            if pkg in self.pkgs:
+                WARN(
+                    f"'{pkg}' was already added to '{self.name}'.",
+                )
+            else:
+                self.pkgs.add(pkg)
         return self
 
     def __lshift__(self, *args) -> "DeclaredPackageManager":
         return self.add(*args)
 
-    def remove(self, package_name: str) -> "DeclaredPackageManager":
-        self.pkgs = [pkg for pkg in self.pkgs if pkg.name != package_name]
+    def remove(
+        self, package: Union[str, Package, Iterable[Package]]
+    ) -> "DeclaredPackageManager":
+        for pkg in ensure_package(package):
+            try:
+                self.pkgs.remove(pkg)
+            except KeyError:
+                WARN(
+                    f"'{pkg}' does not exists in '{self.name}'.",
+                )
         return self
 
-    def __rshift__(self, package_name: str) -> "DeclaredPackageManager":
-        return self.remove(package_name)
+    def __rshift__(self, *args) -> "DeclaredPackageManager":
+        return self.remove(*args)
 
     def ignore(self, *args: str) -> "DeclaredPackageManager":
         """
@@ -180,7 +194,7 @@ class DeclaredPackageManagerRegistry:
         except KeyError:
             pass
         self.data_pair[item] = DeclaredPackageManager(
-            name=item, pkgs=[], ignore_pkgs=set()
+            name=item, pkgs=set(), ignore_pkgs=set()
         )
         return self.data_pair[item]
 
