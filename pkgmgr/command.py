@@ -9,6 +9,7 @@ import traceback
 from pkgmgr.printer import ERROR_EXIT
 
 from .aio import command_runner_stream, command_runner_stream_with_output
+from .helpers import async_all
 
 CommandResult = Tuple[bool, str, str]
 CommandLike = Union[str, Callable[[], CommandResult]]
@@ -31,6 +32,34 @@ class Command:
         raise NotImplementedError(
             "This method is not implemented for this command type."
         )
+
+
+class CompoundCommand(Command):
+    """
+    A class that represents a command.
+    """
+
+    def __init__(self, commands: List[Command]):
+        self.commands = commands
+
+    async def run(self) -> bool:
+        return await async_all(await command.run() for command in self.commands)
+
+    async def run_with_output(self) -> CommandResult:
+        output_all, stderr_all = [], []
+        ret_code = True
+        for cmd in self.commands:
+            ret_code, output, stderr = await cmd.run_with_output()
+            output_all.append(output)
+            stderr_all.append(stderr)
+            if not ret_code:
+                break
+        return ret_code, "\n".join(output_all), "\n".join(stderr_all)
+
+    def with_replacement_part(self, part: str) -> "Command":
+        for command in self.commands:
+            command.with_replacement_part(part)
+        return self
 
 
 class ShellScript(Command):

@@ -8,9 +8,11 @@ import importlib.util
 import pathlib
 import re
 
+from collections.abc import AsyncIterable
 from dataclasses import dataclass, field
 from . import printer
-from .command import Command, FunctionCommand, ShellScript
+from .helpers import async_all
+from .command import Command, CompoundCommand, FunctionCommand, ShellScript
 from .printer import (
     ASK_USER,
     ERROR,
@@ -68,16 +70,6 @@ class PackageManager(ABC):
         List all installed packages.
         """
         pass
-
-
-from collections.abc import AsyncIterable
-
-
-async def async_all(async_iterable: AsyncIterable[object]) -> bool:
-    async for element in async_iterable:
-        if not element:
-            return False
-    return True
 
 
 @dataclass
@@ -146,6 +138,38 @@ def load_user_configs(config_dir: pathlib.Path) -> None:
             spec.loader.exec_module(module)
 
 
+def load_command(
+    cmd,
+    key: str,
+    mgr_name: str,
+) -> Command:
+    if isinstance(cmd, str):
+        return ShellScript(cmd)
+    elif isinstance(cmd, dict):
+        if "py_func_name" in cmd:
+            try:
+                func = FunctionCommand(USER_EXPORT[cmd["py_func_name"]])
+            except KeyError:
+                ERROR_EXIT(
+                    f"The specified functino '{cmd['py_func_name']}' is not exported from the module. "
+                    f"You can export it by the decorator '@export' in the module. E.g.:\n\n"
+                    f"from pkgmgr.registry import export\n\n"
+                    f"@export\n"
+                    f"def {cmd['py_func_name']}():\n"
+                    f"    pass\n"
+                )
+            return func
+        else:
+            ERROR_EXIT(f"Manager '{mgr_name}' is missing required command '{key}'")
+    elif isinstance(cmd, list):
+        return CompoundCommand([load_command(c, key, mgr_name) for c in cmd])
+    else:
+        ERROR_EXIT(
+            f"Unsupported config type '{type(cmd)}' for command '{key}' in manager '{mgr_name}'"
+        )
+    assert False, "Unreachable code"
+
+
 def load_mgr_config(
     config_dir: pathlib.Path, requested_mgrs: Iterable[str]
 ) -> dict[str, PackageManager]:
@@ -173,26 +197,9 @@ def load_mgr_config(
         for key in ["install_cmd", "remove_cmd", "list_cmd"]:
             try:
                 cmd = mgr_config[key]
-                if isinstance(cmd, str):
-                    kwargs[key] = ShellScript(cmd)
-                elif isinstance(cmd, dict):
-                    if "py_func_name" in cmd:
-                        try:
-                            func = FunctionCommand(USER_EXPORT[cmd["py_func_name"]])
-                        except KeyError:
-                            ERROR_EXIT(
-                                f"The specified functino '{cmd['py_func_name']}' is not exported from the module. "
-                                f"You can export it by the decorator '@export' in the module. E.g.:\n\n"
-                                f"from pkgmgr.registry import export\n\n"
-                                f"@export\n"
-                                f"def {cmd['py_func_name']}():\n"
-                                f"    pass\n"
-                            )
-                        kwargs[key] = func
-                    else:
-                        ERROR_EXIT(
-                            f"Manager '{mgr_name}' is missing required command '{key}'"
-                        )
+
+                kwargs[key] = load_command(cmd, key, mgr_name)
+
             except KeyError:
                 ERROR_EXIT(f"Manager '{mgr_name}' is missing required command '{key}'")
         kwargs["supports_multi_pkgs"] = mgr_config.get("supports_multi_pkgs", False)
