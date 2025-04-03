@@ -46,34 +46,8 @@ DEFAULT_SAVE_OUTPUT_FILE = "99.unsorted.py"
 #     )
 
 
-class PackageManager(ABC):
-    # if the package manager supports multiple installs in one command
-    SUPPORTS_MULTIPLE_INSTALLS = True
-
-    @abstractmethod
-    async def install(self, packages: list[Package]) -> bool:
-        """
-        Given a package name, install the package.
-        """
-        pass
-
-    @abstractmethod
-    async def remove(self, package: list[Package]) -> bool:
-        """
-        Given a package name, remove the package.
-        """
-        pass
-
-    @abstractmethod
-    async def list_installed(self) -> list[str]:
-        """
-        List all installed packages.
-        """
-        pass
-
-
 @dataclass
-class SimplePackageManager(PackageManager):
+class PackageManager:
     """
     A simple package manager class that uses shell commands to install and remove packages.
     """
@@ -82,6 +56,7 @@ class SimplePackageManager(PackageManager):
     remove_cmd: Command
     list_cmd: Command
     supports_multi_pkgs: bool
+    disabled: bool = False
     success_ret_code: set[int] = field(default_factory=lambda: {0})
 
     async def install(self, packages: list[Package]) -> bool:
@@ -203,17 +178,23 @@ def load_mgr_config(
             except KeyError:
                 ERROR_EXIT(f"Manager '{mgr_name}' is missing required command '{key}'")
         kwargs["supports_multi_pkgs"] = mgr_config.get("supports_multi_pkgs", False)
+        kwargs["disabled"] = mgr_config.get("disabled", False)
         if "success_ret_code" in mgr_config:
             kwargs["success_ret_code"] = set(mgr_config["success_ret_code"])
 
-        pkg_mgr = SimplePackageManager(**kwargs)  # type: ignore
+        pkg_mgr = PackageManager(**kwargs)  # type: ignore
         mgrs[mgr_name] = pkg_mgr
 
     for mgr_name in requested_mgrs:
         if mgr_name not in mgrs:
             ERROR_EXIT(f"Manager for '{mgr_name}' not found in {pkg_mgr_config}")
 
-    return mgrs
+    # only return the requested managers that are not disabled
+    return {
+        mgr_name: mgrs[mgr_name]
+        for mgr_name in requested_mgrs
+        if not mgrs[mgr_name].disabled
+    }
 
 
 def load_all(config_dir_str: str = "./configs"):
