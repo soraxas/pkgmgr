@@ -135,12 +135,17 @@ async def ASK_USER(question: str) -> bool:
     while True:
         async with PRINT_LOCK:
             print_prefix()
-            answer = (
-                await async_input_non_blocking(
-                    f"{PURPLE}{BOLD}> {UNDERLINE}{question}{END} {PURPLE}(y/n){LIGHT_BLUE} "
-                )
-            ).lower()
-        NEEDS_PREFIX = True
+            try:
+                answer = (
+                    await async_input_non_blocking(
+                        f"{PURPLE}{BOLD}> {UNDERLINE}{question}{END} {PURPLE}(y/n){LIGHT_GRAY} "
+                    )
+                ).lower()
+            except:
+                NEEDS_PREFIX = True
+                print()  # complete the newline
+                raise
+
         if answer in ["y", "yes"]:
             return True
         elif answer in ["n", "no"]:
