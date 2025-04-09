@@ -226,7 +226,7 @@ async def load_all(config_dir_str: str = "./configs"):
 
 async def collect_state(
     requested_mgr: DeclaredPackageManager, pkg_mgr: PackageManager, sort: bool = True
-) -> tuple[set[Package], set[Package]]:
+) -> tuple[list[Package], list[Package]]:
     """
     Collect the state of all package managers.
     """
@@ -252,10 +252,9 @@ async def collect_state(
     )
 
     if sort:
-        pkgs_wanted = set(sorted(pkgs_wanted))
-        pkgs_not_recorded = set(sorted(pkgs_not_recorded))
+        return sorted(pkgs_wanted), sorted(pkgs_not_recorded)
 
-    return pkgs_wanted, pkgs_not_recorded
+    return list(pkgs_wanted), list(pkgs_not_recorded)
 
 
 def santise_variable_name(var_str: str):
