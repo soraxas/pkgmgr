@@ -142,9 +142,12 @@ async def ASK_USER(question: str) -> bool:
                     )
                 ).lower()
             except:
-                NEEDS_PREFIX = True
+                # when error, we need to end the line
                 print()  # complete the newline
                 raise
+            finally:
+                # always reset the prefix after user input
+                NEEDS_PREFIX = True
 
         if answer in ["y", "yes"]:
             return True

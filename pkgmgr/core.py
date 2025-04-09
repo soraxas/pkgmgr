@@ -392,12 +392,20 @@ async def cmd_apply(args: Namespace, managers: dict[str, PackageManager]) -> Non
                     "You can define `install_cmd` / `remove_cmd` in the config file to enable apply cmd."
                 )
             elif await ASK_USER("Do you want to apply the changes?"):
-                if can_install and pkgs_wanted:
-                    if not await pkg_mgr.install(pkgs_wanted):
+                if pkgs_wanted:
+                    if not can_install:
+                        await aWARN(
+                            f"Manager '{name}' does not support installing packages."
+                        )
+                    elif not await pkg_mgr.install(pkgs_wanted):
                         await aERROR_EXIT("Failed to install packages.")
 
-                if can_remove and pkgs_not_recorded:
-                    if not await pkg_mgr.remove(pkgs_not_recorded):
+                if pkgs_not_recorded:
+                    if not can_remove:
+                        await aWARN(
+                            f"Manager '{name}' does not support removing packages."
+                        )
+                    elif not await pkg_mgr.remove(pkgs_not_recorded):
                         await aERROR_EXIT(f"Failed to remove packages.")
 
                 await aINFO(f"Applied.")

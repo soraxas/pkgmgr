@@ -1,7 +1,7 @@
 import asyncio
 import sys
 from io import StringIO
-from typing import Optional, Tuple
+from typing import Any, Callable, Coroutine, Optional, Tuple
 
 from pkgmgr.helpers import ExitSignal, connect_stdin_stdout
 
@@ -13,7 +13,7 @@ from .printer import TERM_STDERR, TERM_STDOUT
 async def stream_output(
     stream: asyncio.StreamReader,
     suffix: str,
-    print_func,
+    print_func: Callable[..., Coroutine],
     additional_output=None,
     show_output: bool = True,
 ):
@@ -41,7 +41,7 @@ async def stream_output(
             if show_output and char:
                 # if we needs prefix now, print it.
                 if printer.NEEDS_PREFIX:
-                    print_func(f"", end="")
+                    await print_func(f"", end="")
                     printer.NEEDS_PREFIX = False
 
                 sys.stdout.write(char)
