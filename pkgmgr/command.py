@@ -34,6 +34,24 @@ class Command:
         )
 
 
+class UndefinedCommand(Command):
+    """
+    A class that represents a command.
+    """
+
+    async def run(self) -> bool:
+        await aERROR_EXIT(
+            "Command is undefined. Please check the command and try again."
+        )
+        raise NotImplementedError()
+
+    async def run_with_output(self) -> CommandResult:
+        await aERROR_EXIT(
+            "Command is undefined. Please check the command and try again."
+        )
+        raise NotImplementedError()
+
+
 class CompoundCommand(Command):
     """
     A class that represents a command.

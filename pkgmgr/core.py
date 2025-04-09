@@ -14,7 +14,13 @@ from collections.abc import AsyncIterable
 from dataclasses import dataclass, field
 from . import printer
 from .helpers import async_all
-from .command import Command, CompoundCommand, FunctionCommand, ShellScript
+from .command import (
+    Command,
+    CompoundCommand,
+    FunctionCommand,
+    ShellScript,
+    UndefinedCommand,
+)
 from .printer import (
     ASK_USER,
     aERROR,
@@ -22,6 +28,7 @@ from .printer import (
     aINFO,
     GREEN,
     RED,
+    aWARN,
 )
 from .registry import (
     MANAGERS as REQUESTED_MANAGERS,
@@ -54,14 +61,14 @@ class PackageManager:
     A simple package manager class that uses shell commands to install and remove packages.
     """
 
-    install_cmd: Command
-    remove_cmd: Command
     list_cmd: Command
-    supports_multi_pkgs: bool
+    install_cmd: Command = field(default_factory=lambda: UndefinedCommand())
+    remove_cmd: Command = field(default_factory=lambda: UndefinedCommand())
+    supports_multi_pkgs: bool = False
     disabled: bool = False
     success_ret_code: set[int] = field(default_factory=lambda: {0})
 
-    async def install(self, packages: list[Package]) -> bool:
+    async def install(self, packages: Iterable[Package]) -> bool:
         # collect all the install commands, depending on
         # if the package manager supports multiple installs in one command
         if self.supports_multi_pkgs:
@@ -77,7 +84,7 @@ class PackageManager:
             for install_cmd_part in install_cmd_parts
         )
 
-    async def remove(self, package: list[Package]) -> bool:
+    async def remove(self, package: Iterable[Package]) -> bool:
         # collect all the remove commands, depending on
         # if the package manager supports multiple removes in one command
         if self.supports_multi_pkgs:
@@ -173,7 +180,7 @@ async def load_mgr_config(
 
         kwargs: Dict[str, Any] = {}
 
-        for key in ["install_cmd", "remove_cmd", "list_cmd"]:
+        for key in ["list_cmd"]:
             try:
                 cmd = mgr_config[key]
 
@@ -325,23 +332,35 @@ async def cmd_save(
 
 async def cmd_apply(args: Namespace, managers: dict[str, PackageManager]) -> None:
 
-    async def inner_apply(name, pkg_mgr, requested_mgr):
+    async def inner_apply(
+        name: str, pkg_mgr: PackageManager, requested_mgr: DeclaredPackageManager
+    ):
         pkgs_wanted, pkgs_not_recorded = await collect_state(requested_mgr, pkg_mgr)
 
         if pkgs_wanted or pkgs_not_recorded:
-            await aINFO("The following changes to packages will be applied:")
+            await aINFO("The following changes to packages are detected:")
 
             for package in pkgs_wanted:
                 await aINFO(f"  + {package}", GREEN)
             for package_name in pkgs_not_recorded:
                 await aINFO(f"  - {package_name}", RED)
 
-            if await ASK_USER("Do you want to apply the changes?"):
-                if pkgs_wanted:
+            can_install = not isinstance(pkg_mgr.install_cmd, UndefinedCommand)
+            can_remove = not isinstance(pkg_mgr.remove_cmd, UndefinedCommand)
+
+            if not can_install and not can_remove:
+                await aWARN(
+                    f"Manager '{name}' does not support installing or removing packages. "
+                )
+                await aWARN(
+                    "You can define `install_cmd` / `remove_cmd` in the config file to enable apply cmd."
+                )
+            elif await ASK_USER("Do you want to apply the changes?"):
+                if can_install and pkgs_wanted:
                     if not await pkg_mgr.install(pkgs_wanted):
                         await aERROR_EXIT("Failed to install packages.")
 
-                if pkgs_not_recorded:
+                if can_remove and pkgs_not_recorded:
                     if not await pkg_mgr.remove(pkgs_not_recorded):
                         await aERROR_EXIT(f"Failed to remove packages.")
 
@@ -384,7 +403,7 @@ async def cmd_diff(args: Namespace, managers: dict[str, PackageManager]) -> None
 
 async def apply_on_each_pkg(
     use_sync: bool,
-    functor: Callable[[str, PackageManager, DeclaredPackageManager], None],
+    functor: Callable[[str, PackageManager, DeclaredPackageManager], Any],
     managers: dict[str, PackageManager],
 ):
     """
