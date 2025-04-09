@@ -2,7 +2,7 @@ import sys
 import asyncio
 
 from contextvars import ContextVar
-from .helpers import ExitSignal
+from .helpers import ExitSignal, async_input_non_blocking
 
 
 PRINT_LOCK = asyncio.Lock()
@@ -128,11 +128,6 @@ async def aERROR_EXIT(*args, **kw):
     raise ExitSignal()
 
 
-async def async_input(prompt: str) -> str:
-    loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(None, lambda: input(prompt))
-
-
 async def ASK_USER(question: str) -> bool:
     # try:
     global NEEDS_PREFIX
@@ -141,7 +136,7 @@ async def ASK_USER(question: str) -> bool:
         async with PRINT_LOCK:
             print_prefix()
             answer = (
-                await async_input(
+                await async_input_non_blocking(
                     f"{PURPLE}{BOLD}> {UNDERLINE}{question}{END} {PURPLE}(y/n){LIGHT_BLUE} "
                 )
             ).lower()

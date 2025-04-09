@@ -3,7 +3,7 @@ import sys
 from io import StringIO
 from typing import Optional, Tuple
 
-from pkgmgr.helpers import ExitSignal
+from pkgmgr.helpers import ExitSignal, connect_stdin_stdout
 
 
 from . import printer
@@ -48,14 +48,6 @@ async def stream_output(
                 sys.stdout.flush()
                 if char == "\n":
                     printer.NEEDS_PREFIX = True
-
-
-async def connect_stdin_stdout():
-    loop = asyncio.get_event_loop()
-    reader = asyncio.StreamReader()
-    protocol = asyncio.StreamReaderProtocol(reader)
-    await loop.connect_read_pipe(lambda: protocol, sys.stdin)
-    return reader
 
 
 async def handle_input(writer: asyncio.StreamWriter):
