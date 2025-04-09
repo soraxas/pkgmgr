@@ -10,7 +10,7 @@ import traceback
 from pkgmgr.printer import aERROR, aERROR_EXIT
 
 from .aio import command_runner_stream, command_runner_stream_with_output
-from .helpers import ExitSignal, async_all
+from .helpers import ExitSignal, async_all, split_script_as_shell
 
 CommandResult = Tuple[bool, str, str]
 CommandLike = Union[str, Callable[[], CommandResult]]
@@ -79,19 +79,6 @@ class CompoundCommand(Command):
         for command in self.commands:
             command.with_replacement_part(part)
         return self
-
-
-def smart_expand(token: str) -> str:
-    if token.startswith(("~", "$HOME", "/")):
-        return os.path.expandvars(os.path.expanduser(token))
-    return token
-
-
-def split_script_as_shell(script: str) -> list[str]:
-    """
-    Split a script into a list of commands.
-    """
-    return [smart_expand(s) for s in shlex.split(script)]
 
 
 class ShellScript(Command):

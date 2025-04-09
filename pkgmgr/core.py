@@ -13,7 +13,7 @@ import re
 from collections.abc import AsyncIterable
 from dataclasses import dataclass, field
 from . import printer
-from .helpers import async_all
+from .helpers import async_all, santise_variable_name
 from .command import (
     Command,
     CompoundCommand,
@@ -33,26 +33,11 @@ from .printer import (
 from .registry import (
     MANAGERS as REQUESTED_MANAGERS,
     Package,
-    DeclaredPackageManager,
+    DeclaredPackageState,
     USER_EXPORT,
 )
 
 DEFAULT_SAVE_OUTPUT_FILE = "99.unsorted.py"
-
-
-# def command_runner(command: list[str]) -> tuple[int, str, str]:
-#     """
-#     Runs a command and returns the exit code.
-#     """
-#     process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-#     assert process.stdout is not None
-#     assert process.stderr is not None
-#     process.wait()
-#     return (
-#         process.returncode,
-#         process.stdout.read().decode(),
-#         process.stderr.read().decode(),
-#     )
 
 
 @dataclass
@@ -62,7 +47,7 @@ class PackageManager:
     """
 
     list_cmd: Command
-    install_cmd: Command = field(default_factory=lambda: UndefinedCommand())
+    add_cmd: Command = field(default_factory=lambda: UndefinedCommand())
     remove_cmd: Command = field(default_factory=lambda: UndefinedCommand())
     supports_multi_pkgs: bool = False
     supports_save: bool = True
@@ -73,16 +58,14 @@ class PackageManager:
         # collect all the install commands, depending on
         # if the package manager supports multiple installs in one command
         if self.supports_multi_pkgs:
-            install_cmd_parts = [
-                " ".join(pkg.get_install_cmd_part() for pkg in packages)
-            ]
+            add_cmd_parts = [" ".join(pkg.get_add_cmd_part() for pkg in packages)]
         else:
-            install_cmd_parts = [pkg.get_install_cmd_part() for pkg in packages]
+            add_cmd_parts = [pkg.get_add_cmd_part() for pkg in packages]
 
         # run the install commands
         return await async_all(
-            await self.install_cmd.with_replacement_part(install_cmd_part).run()
-            for install_cmd_part in install_cmd_parts
+            await self.add_cmd.with_replacement_part(add_cmd_part).run()
+            for add_cmd_part in add_cmd_parts
         )
 
     async def remove(self, package: Iterable[Package]) -> bool:
@@ -185,7 +168,7 @@ async def load_mgr_config(
         if "success_ret_code" in mgr_config:
             kwargs["success_ret_code"] = set(mgr_config.pop("success_ret_code"))
 
-        for key in ["list_cmd", "install_cmd", "remove_cmd"]:
+        for key in ["list_cmd", "add_cmd", "remove_cmd"]:
             cmd = mgr_config.pop(key, None)
             if cmd:
                 kwargs[key] = await load_command(cmd, key, mgr_name)
@@ -232,14 +215,14 @@ async def load_all(config_dir_str: str = "./configs"):
 
 
 async def collect_state(
-    requested_mgr: DeclaredPackageManager, pkg_mgr: PackageManager, sort: bool = True
+    requested_state: DeclaredPackageState, pkg_mgr: PackageManager, sort: bool = True
 ) -> tuple[list[Package], list[Package]]:
     """
     Collect the state of all package managers.
     """
     await aINFO(f"Checking packages state...")
 
-    want_installed = requested_mgr.pkgs
+    want_installed = requested_state.pkgs
     currently_installed_packages = set(
         Package(pkg) if isinstance(pkg, str) else pkg
         for pkg in (await pkg_mgr.list_installed())
@@ -255,20 +238,13 @@ async def collect_state(
     #######################################################
 
     pkgs_not_recorded = (
-        currently_installed_packages - set(want_installed) - requested_mgr.ignore_pkgs
+        currently_installed_packages - set(want_installed) - requested_state.ignore_pkgs
     )
 
     if sort:
         return sorted(pkgs_wanted), sorted(pkgs_not_recorded)
 
     return list(pkgs_wanted), list(pkgs_not_recorded)
-
-
-def santise_variable_name(var_str: str):
-    """
-    Sanitise a variable name by replacing non-alphanumeric characters with underscores.
-    """
-    return re.sub("\W|^(?=\d)", "_", var_str)
 
 
 async def save_wanted_pkgs_to_file(file, pkg_mgr_name, pkgs_wanted, pkgs_not_recorded):
@@ -300,8 +276,8 @@ def for_each_registered_mgr(managers: dict[str, PackageManager]):
     """
     for pkg_mgr_name, pkg_mgr in managers.items():
         with printer.PKG_CTX(pkg_mgr_name):
-            requested_mgr = REQUESTED_MANAGERS[pkg_mgr_name]
-            yield pkg_mgr_name, pkg_mgr, requested_mgr
+            requested_state = REQUESTED_MANAGERS[pkg_mgr_name]
+            yield pkg_mgr_name, pkg_mgr, requested_state
 
 
 async def cmd_save(
@@ -317,8 +293,10 @@ async def cmd_save(
 
     if args.sync:
         # process all requested managers and see if we need to write anything
-        for pkg_mgr_name, pkg_mgr, requested_mgr in for_each_registered_mgr(managers):
-            pkgs_wanted, pkgs_not_recorded = await collect_state(requested_mgr, pkg_mgr)
+        for pkg_mgr_name, pkg_mgr, requested_state in for_each_registered_mgr(managers):
+            pkgs_wanted, pkgs_not_recorded = await collect_state(
+                requested_state, pkg_mgr
+            )
             packages_with_changes.append((pkg_mgr_name, pkgs_wanted, pkgs_not_recorded))
     else:
 
@@ -369,9 +347,9 @@ async def cmd_save(
 async def cmd_apply(args: Namespace, managers: dict[str, PackageManager]) -> None:
 
     async def inner_apply(
-        name: str, pkg_mgr: PackageManager, requested_mgr: DeclaredPackageManager
+        name: str, pkg_mgr: PackageManager, requested_state: DeclaredPackageState
     ):
-        pkgs_wanted, pkgs_not_recorded = await collect_state(requested_mgr, pkg_mgr)
+        pkgs_wanted, pkgs_not_recorded = await collect_state(requested_state, pkg_mgr)
 
         if pkgs_wanted or pkgs_not_recorded:
             await aINFO("The following changes to packages are detected:")
@@ -381,7 +359,7 @@ async def cmd_apply(args: Namespace, managers: dict[str, PackageManager]) -> Non
             for package_name in pkgs_not_recorded:
                 await aINFO(f"  - {package_name}", RED)
 
-            can_install = not isinstance(pkg_mgr.install_cmd, UndefinedCommand)
+            can_install = not isinstance(pkg_mgr.add_cmd, UndefinedCommand)
             can_remove = not isinstance(pkg_mgr.remove_cmd, UndefinedCommand)
 
             if not can_install and not can_remove:
@@ -389,7 +367,7 @@ async def cmd_apply(args: Namespace, managers: dict[str, PackageManager]) -> Non
                     f"Manager '{name}' does not support installing or removing packages. "
                 )
                 await aWARN(
-                    "You can define `install_cmd` / `remove_cmd` in the config file to enable apply cmd."
+                    "You can define `add_cmd` / `remove_cmd` in the config file to enable apply cmd."
                 )
             elif await ASK_USER("Do you want to apply the changes?"):
                 if pkgs_wanted:
@@ -424,8 +402,8 @@ async def cmd_apply(args: Namespace, managers: dict[str, PackageManager]) -> Non
 
 async def cmd_diff(args: Namespace, managers: dict[str, PackageManager]) -> None:
 
-    async def inner_diff(name, pkg_mgr, requested_mgr):
-        pkgs_wanted, pkgs_not_recorded = await collect_state(requested_mgr, pkg_mgr)
+    async def inner_diff(name, pkg_mgr, requested_state):
+        pkgs_wanted, pkgs_not_recorded = await collect_state(requested_state, pkg_mgr)
 
         if pkgs_wanted or pkgs_not_recorded:
             await aINFO("Diff of current system against the configs:")
@@ -447,23 +425,23 @@ async def cmd_diff(args: Namespace, managers: dict[str, PackageManager]) -> None
 
 async def apply_on_each_pkg(
     use_sync: bool,
-    functor: Callable[[str, PackageManager, DeclaredPackageManager], Any],
+    functor: Callable[[str, PackageManager, DeclaredPackageState], Any],
     managers: dict[str, PackageManager],
 ):
     """
     A helper function to apply a function on each package manager.
     """
 
-    async def wrapper(name, pkg_mgr, requested_mgr):
+    async def wrapper(name, pkg_mgr, requested_state):
         # this wrapper enable the context manager to be used
         # in the async function
         with printer.PKG_CTX(name):
-            return await functor(name, pkg_mgr, requested_mgr)
+            return await functor(name, pkg_mgr, requested_state)
 
     tasks = []
-    for name, pkg_mgr, requested_mgr in for_each_registered_mgr(managers):
+    for name, pkg_mgr, requested_state in for_each_registered_mgr(managers):
         if use_sync:
-            await wrapper(name, pkg_mgr, requested_mgr)
+            await wrapper(name, pkg_mgr, requested_state)
         else:
-            tasks.append(wrapper(name, pkg_mgr, requested_mgr))
+            tasks.append(wrapper(name, pkg_mgr, requested_state))
     await asyncio.gather(*tasks, return_exceptions=True)

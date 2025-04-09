@@ -29,21 +29,21 @@ def export(function):
 class Package:
     """
     A class that represents a package.
-    If install_cmd_part is None, it is assumed that the package is installed via its own name.
+    If add_cmd_part is None, it is assumed that the package is installed via its own name.
     """
 
     name: str
-    install_cmd: Optional[str] = None
+    add_cmd_part: Optional[str] = None
     extra: Optional[str] = None
     metadata: Optional[dict] = None
 
     def __post_init__(self):
-        if self.install_cmd and self.extra:
-            raise ValueError("Cannot have both install_cmd and extra")
+        if self.add_cmd_part and self.extra:
+            raise ValueError("Cannot have both add_cmd_part and extra")
 
-    def get_install_cmd_part(self):
-        if self.install_cmd:
-            return self.install_cmd
+    def get_add_cmd_part(self):
+        if self.add_cmd_part:
+            return self.add_cmd_part
         if self.extra:
             return f"{self.name} {self.extra}"
         return self.name
@@ -56,7 +56,7 @@ class Package:
         """
         A key that can be used to compare two packages.
         """
-        # return (self.name, self.install_cmd, self.extra)
+        # return (self.name, self.add_cmd_part, self.extra)
         return self.name
 
     @property
@@ -64,7 +64,7 @@ class Package:
         """
         Check if the package is a unit.
         """
-        return self.install_cmd is None and self.extra is None and not self.metadata
+        return self.add_cmd_part is None and self.extra is None and not self.metadata
 
     def __eq__(self, other):
         if isinstance(other, Package):
@@ -129,9 +129,9 @@ def ensure_package(
 
 
 @dataclass
-class DeclaredPackageManager:
+class DeclaredPackageState:
     """
-    A class that represents a manager for user to declare packages.
+    A class that allows user to declare desire package state.
     """
 
     name: str
@@ -140,7 +140,7 @@ class DeclaredPackageManager:
 
     def add(
         self, package: Union[str, Package, Iterable[Package]]
-    ) -> "DeclaredPackageManager":
+    ) -> "DeclaredPackageState":
         for pkg in ensure_package(package):
             if pkg in self.pkgs:
                 WARN(
@@ -150,12 +150,12 @@ class DeclaredPackageManager:
                 self.pkgs.add(pkg)
         return self
 
-    def __lshift__(self, *args) -> "DeclaredPackageManager":
+    def __lshift__(self, *args) -> "DeclaredPackageState":
         return self.add(*args)
 
     def remove(
         self, package: Union[str, Package, Iterable[Package]]
-    ) -> "DeclaredPackageManager":
+    ) -> "DeclaredPackageState":
         for pkg in ensure_package(package):
             try:
                 self.pkgs.remove(pkg)
@@ -165,10 +165,10 @@ class DeclaredPackageManager:
                 )
         return self
 
-    def __rshift__(self, *args) -> "DeclaredPackageManager":
+    def __rshift__(self, *args) -> "DeclaredPackageState":
         return self.remove(*args)
 
-    def ignore(self, *args: str) -> "DeclaredPackageManager":
+    def ignore(self, *args: str) -> "DeclaredPackageState":
         """
         Ignore packages.
         """
@@ -183,17 +183,17 @@ class DeclaredPackageManagerRegistry:
     A class to store the declared package managers.
     """
 
-    data_pair: dict[str, DeclaredPackageManager]
+    data_pair: dict[str, DeclaredPackageState]
 
     def __init__(self):
         self.data_pair = {}
 
-    def __getitem__(self, item: str) -> DeclaredPackageManager:
+    def __getitem__(self, item: str) -> DeclaredPackageState:
         try:
             return self.data_pair[item]
         except KeyError:
             pass
-        self.data_pair[item] = DeclaredPackageManager(
+        self.data_pair[item] = DeclaredPackageState(
             name=item, pkgs=set(), ignore_pkgs=set()
         )
         return self.data_pair[item]
