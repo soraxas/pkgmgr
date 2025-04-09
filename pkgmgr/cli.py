@@ -70,34 +70,33 @@ def main():
 
     from . import core
     from . import printer
-    from .printer import aINFO
+    from .printer import aINFO, INFO
 
     async def run():
         manager = await core.load_all(args.config_dir)
-        try:
 
-            with printer.PKG_CTX(args.command):
-                await aINFO(f"Executing {args.command}...")
+        with printer.PKG_CTX(args.command):
+            await aINFO(f"Executing {args.command}...")
 
-                if args.command == "save":
-                    await core.cmd_save(args.config_dir, manager, args)
+            if args.command == "save":
+                await core.cmd_save(args.config_dir, manager, args)
 
-                elif args.command == "apply":
-                    await core.cmd_apply(args, manager)
+            elif args.command == "apply":
+                await core.cmd_apply(args, manager)
 
-                elif args.command == "check":
-                    await aINFO("Executing 'check' action...")
+            elif args.command == "check":
+                await aINFO("Executing 'check' action...")
 
-                elif args.command == "diff":
-                    await core.cmd_diff(args, manager)
+            elif args.command == "diff":
+                await core.cmd_diff(args, manager)
 
-                await aINFO("All done.")
+            await aINFO("All done.")
 
-        except ExitSignal:
-            await aINFO("Exiting...")
-            exit(1)
-
-    asyncio.run(run())
+    try:
+        asyncio.run(run())
+    except (KeyboardInterrupt, ExitSignal):
+        INFO("Exiting...")
+        exit(1)
 
 
 if __name__ == "__main__":

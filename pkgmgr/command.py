@@ -6,10 +6,10 @@ import inspect
 import traceback
 
 
-from pkgmgr.printer import aERROR_EXIT
+from pkgmgr.printer import aERROR, aERROR_EXIT
 
 from .aio import command_runner_stream, command_runner_stream_with_output
-from .helpers import async_all
+from .helpers import ExitSignal, async_all
 
 CommandResult = Tuple[bool, str, str]
 CommandLike = Union[str, Callable[[], CommandResult]]
@@ -123,9 +123,12 @@ class FunctionCommand(Command):
                 return await self.functor()
             else:
                 return self.functor()
+        except ExitSignal as e:
+            await aERROR("Task was cancelled")
+            raise e
         except Exception as e:
 
-            aERROR_EXIT(
+            await aERROR_EXIT(
                 f"Error while executing function {self.functor.__name__}: {traceback.format_exc()}"
             )
             raise e

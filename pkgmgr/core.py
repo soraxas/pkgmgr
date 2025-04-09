@@ -403,4 +403,4 @@ async def apply_on_each_pkg(
             await wrapper(name, pkg_mgr, requested_mgr)
         else:
             tasks.append(wrapper(name, pkg_mgr, requested_mgr))
-    await asyncio.gather(*tasks)
+    await asyncio.gather(*tasks, return_exceptions=True)

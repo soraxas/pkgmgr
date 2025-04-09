@@ -3,6 +3,8 @@ import sys
 from io import StringIO
 from typing import Optional, Tuple
 
+from pkgmgr.helpers import ExitSignal
+
 
 from . import printer
 from .printer import TERM_STDERR, TERM_STDOUT
@@ -120,15 +122,27 @@ async def command_runner_stream(
         )
     if process.stdin:
         input_task = asyncio.create_task(handle_input(process.stdin))
+        tasks.append(input_task)
 
     # Wait for process to finish and ensure input task is properly cleaned up
-    return_code = await process.wait()
+    try:
+        return_code = await process.wait()
+    except asyncio.exceptions.CancelledError:
+        # If the process is cancelled, we need to ensure that the input task is also cancelled
+        for t in tasks:
+            t.cancel()
 
-    if process.stdin:
-        # Once process is complete, cancel the input task and ensure clean-up
-        input_task.cancel()
+        # ❗ Kill the subprocess to prevent lingering pipe cleanup
+        process.kill()
+        await process.wait()
+        raise ExitSignal()
 
-    await asyncio.wait(tasks)
+    finally:
+        if process.stdin:
+            # Once process is complete, cancel the input task and ensure clean-up
+            input_task.cancel()
+
+        await asyncio.wait(tasks)
 
     return return_code
 

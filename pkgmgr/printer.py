@@ -107,6 +107,10 @@ async def aINFO(text: str, color=CYAN):
     await amy_print(text, color)
 
 
+def INFO(text: str, color=CYAN):
+    my_print(text, color)
+
+
 async def aWARN(text: str, color=PINK):
     await amy_print(text, color)
 
