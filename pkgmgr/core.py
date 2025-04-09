@@ -65,6 +65,7 @@ class PackageManager:
     install_cmd: Command = field(default_factory=lambda: UndefinedCommand())
     remove_cmd: Command = field(default_factory=lambda: UndefinedCommand())
     supports_multi_pkgs: bool = False
+    supports_save: bool = True
     disabled: bool = False
     success_ret_code: set[int] = field(default_factory=lambda: {0})
 
@@ -180,22 +181,28 @@ async def load_mgr_config(
 
         kwargs: Dict[str, Any] = {}
 
-        for key in ["list_cmd"]:
-            try:
-                cmd = mgr_config[key]
+        # configs that require special handling
+        if "success_ret_code" in mgr_config:
+            kwargs["success_ret_code"] = set(mgr_config.pop("success_ret_code"))
 
+        for key in ["list_cmd", "install_cmd", "remove_cmd"]:
+            cmd = mgr_config.pop(key, None)
+            if cmd:
                 kwargs[key] = await load_command(cmd, key, mgr_name)
 
-            except KeyError:
-                await aERROR_EXIT(
-                    f"Manager '{mgr_name}' is missing required command '{key}'"
-                )
-        kwargs["supports_multi_pkgs"] = mgr_config.get("supports_multi_pkgs", False)
-        kwargs["disabled"] = mgr_config.get("disabled", False)
-        if "success_ret_code" in mgr_config:
-            kwargs["success_ret_code"] = set(mgr_config["success_ret_code"])
+        # pass the rest of the config as kwargs
+        kwargs.update(mgr_config)
 
-        pkg_mgr = PackageManager(**kwargs)  # type: ignore
+        try:
+            pkg_mgr = PackageManager(**kwargs)  # type: ignore
+        except TypeError as e:
+            simplified_msg = (
+                str(e).replace(f"{PackageManager.__name__}.__init__()", "").strip()
+            )
+
+            await aERROR_EXIT(
+                f"Error loading package manager '{mgr_name}': {simplified_msg}"
+            )
         mgrs_def[mgr_name] = pkg_mgr
 
     for mgr_name in requested_mgrs:
@@ -306,13 +313,13 @@ async def cmd_save(
             "Please organise your packages definition in the config directory first."
         )
 
-    packages_to_write = []
+    packages_with_changes = []
 
     if args.sync:
         # process all requested managers and see if we need to write anything
         for pkg_mgr_name, pkg_mgr, requested_mgr in for_each_registered_mgr(managers):
             pkgs_wanted, pkgs_not_recorded = await collect_state(requested_mgr, pkg_mgr)
-            packages_to_write.append((pkg_mgr_name, pkgs_wanted, pkgs_not_recorded))
+            packages_with_changes.append((pkg_mgr_name, pkgs_wanted, pkgs_not_recorded))
     else:
 
         async def async_wrap(name, coro):
@@ -329,14 +336,21 @@ async def cmd_save(
                 for pkg_mgr_name, pkg_mgr in managers.items()
             )
         ):
-            packages_to_write.append(await coro)
+            packages_with_changes.append(await coro)
 
-    # remove empty packages
-    packages_to_write = [
-        (name, pkgs_wanted, pkgs_not_recorded)
-        for name, pkgs_wanted, pkgs_not_recorded in packages_to_write
-        if pkgs_wanted or pkgs_not_recorded
-    ]
+    # remove empty packages, and post-process
+    packages_to_write = []
+    for pkg_mgr_name, pkgs_wanted, pkgs_not_recorded in packages_with_changes:
+        if pkgs_wanted or pkgs_not_recorded:
+            if not managers[pkg_mgr_name].supports_save:
+                with printer.PKG_CTX(pkg_mgr_name):
+                    await aWARN(
+                        f"Manager '{pkg_mgr_name}' has changes, but does not support saving packages to config. "
+                        ""
+                    )
+                    await aWARN("Use `diff_cmd` to see the changes.")
+            else:
+                packages_to_write.append((pkg_mgr_name, pkgs_wanted, pkgs_not_recorded))
 
     # only start a new file if we have something to write
     if packages_to_write:
