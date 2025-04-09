@@ -3,6 +3,8 @@ import argparse
 import asyncio
 from pathlib import Path
 
+from pkgmgr.helpers import ExitSignal
+
 
 def main():
 
@@ -51,6 +53,12 @@ def main():
         action="store_true",
         help="Allow overwriting existing files",
     )
+    parser.add_argument(
+        "-s",
+        "--sync",
+        action="store_true",
+        help="Run synchronously instead of asynchronously, whcih is useful for debugging",
+    )
 
     parser.add_argument(
         "command",
@@ -62,28 +70,34 @@ def main():
 
     from . import core
     from . import printer
-    from .printer import INFO
+    from .printer import aINFO
 
-    manager = core.load_all(args.config_dir)
+    async def run():
+        manager = await core.load_all(args.config_dir)
+        try:
 
-    with printer.PKG_CTX(args.command):
-        INFO(f"Executing {args.command}...")
+            with printer.PKG_CTX(args.command):
+                await aINFO(f"Executing {args.command}...")
 
-        if args.command == "save":
-            asyncio.run(core.cmd_save(args.config_dir, manager, args))
+                if args.command == "save":
+                    await core.cmd_save(args.config_dir, manager, args)
 
-        elif args.command == "apply":
-            asyncio.run(core.cmd_apply(manager))
+                elif args.command == "apply":
+                    await core.cmd_apply(args, manager)
 
-        elif args.command == "check":
-            print("Executing 'check' action...")
+                elif args.command == "check":
+                    await aINFO("Executing 'check' action...")
 
-        elif args.command == "diff":
-            asyncio.run(core.cmd_diff(manager))
+                elif args.command == "diff":
+                    await core.cmd_diff(args, manager)
 
-        INFO("All done.")
-    # else:
-    #     parser.print_help()
+                await aINFO("All done.")
+
+        except ExitSignal:
+            await aINFO("Exiting...")
+            exit(1)
+
+    asyncio.run(run())
 
 
 if __name__ == "__main__":

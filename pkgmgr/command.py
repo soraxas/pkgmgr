@@ -6,7 +6,7 @@ import inspect
 import traceback
 
 
-from pkgmgr.printer import ERROR_EXIT
+from pkgmgr.printer import aERROR_EXIT
 
 from .aio import command_runner_stream, command_runner_stream_with_output
 from .helpers import async_all
@@ -125,7 +125,7 @@ class FunctionCommand(Command):
                 return self.functor()
         except Exception as e:
 
-            ERROR_EXIT(
+            aERROR_EXIT(
                 f"Error while executing function {self.functor.__name__}: {traceback.format_exc()}"
             )
             raise e

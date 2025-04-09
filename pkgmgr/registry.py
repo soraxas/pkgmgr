@@ -1,6 +1,6 @@
 from dataclasses import dataclass, fields
 from typing import Generator, Iterable, Optional, Union, Set, List
-from .printer import ERROR_EXIT, WARN
+from .printer import aERROR_EXIT, WARN
 
 USER_EXPORT = {}
 
@@ -121,7 +121,7 @@ def ensure_package(
             some_object_iterator = iter(package)
         except TypeError as te:
             # not iterable.
-            ERROR_EXIT(
+            aERROR_EXIT(
                 f"Package {package} is not a string, Package instance, nor list of Packages. Please check your configuration."
             )
         for pkg in some_object_iterator:

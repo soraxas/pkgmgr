@@ -1,6 +1,11 @@
-from contextvars import ContextVar
 import sys
-from typing import Optional
+import asyncio
+
+from contextvars import ContextVar
+from .helpers import ExitSignal
+
+
+PRINT_LOCK = asyncio.Lock()
 
 
 GREEN = "\033[92m"
@@ -64,64 +69,87 @@ PKG_CTX = PackageContext()
 
 
 def print_prefix(**kw):
+    """
+    Assumes the print lock is already acquired.
+    """
     global NEEDS_PREFIX
 
     pkg = PKG_CTX.current_pkg.get()
     pkg_txt = f"{BROWN}[{pkg}] " if pkg else ""
-    # print('33')
     print(f"{GREY}:: {pkg_txt}", **kw, end="")
     sys.stdout.flush()
     NEEDS_PREFIX = False
 
 
+async def amy_print(*args, **kwargs):
+    async with PRINT_LOCK:
+        my_print(*args, **kwargs)
+
+
 def my_print(text: str, color: str, end="\n", **kw):
     global NEEDS_PREFIX
+
     if NEEDS_PREFIX:
         print_prefix()
     print(f"{color}{text}{END}", **kw, end=end)
     NEEDS_PREFIX = True
 
 
-def TERM_STDOUT(text: str, **kw):
-    my_print(text, NORMAL, **kw)
+async def TERM_STDOUT(text: str, **kw):
+    await amy_print(text, NORMAL, **kw)
 
 
-def TERM_STDERR(text: str, **kw):
-    my_print(text, PINK, **kw, file=sys.stderr)
+async def TERM_STDERR(text: str, **kw):
+    await amy_print(text, PINK, **kw, file=sys.stderr)
 
 
-def INFO(text: str, color=CYAN):
-    my_print(text, color)
+async def aINFO(text: str, color=CYAN):
+    await amy_print(text, color)
+
+
+async def aWARN(text: str, color=PINK):
+    await amy_print(text, color)
 
 
 def WARN(text: str, color=PINK):
     my_print(text, color)
 
 
-def ERROR(text: str):
-    my_print(text, RED, file=sys.stderr)
+async def aERROR(text: str):
+    await amy_print(text, RED, file=sys.stderr)
 
 
-def ERROR_EXIT(*args, **kw):
-    ERROR(*args, **kw)
-    exit(1)
+async def aERROR_EXIT(*args, **kw):
+    await aERROR(*args, **kw)
+    raise ExitSignal()
 
 
-def ASK_USER(question: str) -> bool:
-    """
-    Ask the user a yes/no question and return the answer.
-    """
+async def async_input(prompt: str) -> str:
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, lambda: input(prompt))
+
+
+async def ASK_USER(question: str) -> bool:
+    # try:
     global NEEDS_PREFIX
 
     while True:
-        print_prefix()
-        answer = input(
-            f"{PURPLE}{BOLD}> {UNDERLINE}{question}{END} {PURPLE}(y/n){LIGHT_BLUE} "
-        ).lower()
+        async with PRINT_LOCK:
+            print_prefix()
+            answer = (
+                await async_input(
+                    f"{PURPLE}{BOLD}> {UNDERLINE}{question}{END} {PURPLE}(y/n){LIGHT_BLUE} "
+                )
+            ).lower()
         NEEDS_PREFIX = True
         if answer in ["y", "yes"]:
             return True
         elif answer in ["n", "no"]:
             return False
         else:
-            ERROR(f"Invalid input, please enter 'y' or 'n'{END}")
+            await aERROR(f"Invalid input, please enter 'y' or 'n'{END}")
+
+
+# except KeyboardInterrupt:
+#     print("\nOperation cancelled by user.")
+#     return False

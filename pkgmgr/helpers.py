@@ -6,3 +6,7 @@ async def async_all(async_iterable: AsyncIterable[object]) -> bool:
         if not element:
             return False
     return True
+
+
+class ExitSignal(Exception):
+    pass

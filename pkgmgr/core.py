@@ -1,9 +1,11 @@
 from abc import ABC, abstractmethod
 from argparse import Namespace
 import subprocess
+import asyncio
+
 import tomllib
 import shlex
-from typing import Any, Dict, Iterable, Optional
+from typing import Any, Callable, Dict, Iterable, Optional
 import importlib.util
 import pathlib
 import re
@@ -15,9 +17,9 @@ from .helpers import async_all
 from .command import Command, CompoundCommand, FunctionCommand, ShellScript
 from .printer import (
     ASK_USER,
-    ERROR,
-    ERROR_EXIT,
-    INFO,
+    aERROR,
+    aERROR_EXIT,
+    aINFO,
     GREEN,
     RED,
 )
@@ -92,20 +94,20 @@ class PackageManager:
     async def list_installed(self) -> list[str]:
         success, stdout, stderr = await self.list_cmd.run_with_output()
         if not success:
-            ERROR_EXIT(f"Failed to list installed packages: {stderr}")
+            await aERROR_EXIT(f"Failed to list installed packages: {stderr}")
         if isinstance(stdout, str):
             return stdout.splitlines()
         return stdout
 
 
-def load_user_configs(config_dir: pathlib.Path) -> None:
+async def load_user_configs(config_dir: pathlib.Path) -> None:
     """
     Load user configs from the config directory.
     """
     # import all .py file in the config directory
     with printer.PKG_CTX("pkg-state"):
         for file in sorted(config_dir.glob("*.py")):
-            INFO(f"Sourcing '{file}'...")
+            await aINFO(f"Sourcing '{file}'...")
             spec = importlib.util.spec_from_file_location(file.name, file)
             assert spec is not None
             module = importlib.util.module_from_spec(spec)
@@ -113,7 +115,7 @@ def load_user_configs(config_dir: pathlib.Path) -> None:
             spec.loader.exec_module(module)
 
 
-def load_command(
+async def load_command(
     cmd,
     key: str,
     mgr_name: str,
@@ -125,7 +127,7 @@ def load_command(
             try:
                 func = FunctionCommand(USER_EXPORT[cmd["py_func_name"]])
             except KeyError:
-                ERROR_EXIT(
+                await aERROR_EXIT(
                     f"The specified functino '{cmd['py_func_name']}' is not exported from the module. "
                     f"You can export it by the decorator '@export' in the module. E.g.:\n\n"
                     f"from pkgmgr.registry import export\n\n"
@@ -135,17 +137,19 @@ def load_command(
                 )
             return func
         else:
-            ERROR_EXIT(f"Manager '{mgr_name}' is missing required command '{key}'")
+            await aERROR_EXIT(
+                f"Manager '{mgr_name}' is missing required command '{key}'"
+            )
     elif isinstance(cmd, list):
-        return CompoundCommand([load_command(c, key, mgr_name) for c in cmd])
+        return CompoundCommand([await load_command(c, key, mgr_name) for c in cmd])
     else:
-        ERROR_EXIT(
+        await aERROR_EXIT(
             f"Unsupported config type '{type(cmd)}' for command '{key}' in manager '{mgr_name}'"
         )
     assert False, "Unreachable code"
 
 
-def load_mgr_config(
+async def load_mgr_config(
     config_dir: pathlib.Path, requested_mgrs: Iterable[str]
 ) -> dict[str, PackageManager]:
     """
@@ -154,17 +158,17 @@ def load_mgr_config(
     # import all .py file in the config directory
     pkg_mgr_config = config_dir / "pkgmgr.toml"
     if not pkg_mgr_config.is_file():
-        ERROR_EXIT(f"Config file '{pkg_mgr_config}' does not exist.")
+        await aERROR_EXIT(f"Config file '{pkg_mgr_config}' does not exist.")
 
     with open(pkg_mgr_config, "rb") as f:
         config = tomllib.load(f)
 
-        managers_conf = config.get("manager")
-        if managers_conf is None:
-            ERROR("No package managers found in config.toml")
-            exit(1)
+        try:
+            managers_conf = config["manager"]
+        except KeyError:
+            await aERROR_EXIT("No package managers found in config.toml")
 
-    mgrs: dict[str, PackageManager] = {}
+    mgrs_def: dict[str, PackageManager] = {}
     for mgr_name, mgr_config in managers_conf.items():
 
         kwargs: Dict[str, Any] = {}
@@ -173,42 +177,43 @@ def load_mgr_config(
             try:
                 cmd = mgr_config[key]
 
-                kwargs[key] = load_command(cmd, key, mgr_name)
+                kwargs[key] = await load_command(cmd, key, mgr_name)
 
             except KeyError:
-                ERROR_EXIT(f"Manager '{mgr_name}' is missing required command '{key}'")
+                await aERROR_EXIT(
+                    f"Manager '{mgr_name}' is missing required command '{key}'"
+                )
         kwargs["supports_multi_pkgs"] = mgr_config.get("supports_multi_pkgs", False)
         kwargs["disabled"] = mgr_config.get("disabled", False)
         if "success_ret_code" in mgr_config:
             kwargs["success_ret_code"] = set(mgr_config["success_ret_code"])
 
         pkg_mgr = PackageManager(**kwargs)  # type: ignore
-        mgrs[mgr_name] = pkg_mgr
+        mgrs_def[mgr_name] = pkg_mgr
 
     for mgr_name in requested_mgrs:
-        if mgr_name not in mgrs:
-            ERROR_EXIT(f"Manager for '{mgr_name}' not found in {pkg_mgr_config}")
+        if mgr_name not in mgrs_def:
+            await aERROR_EXIT(f"Manager for '{mgr_name}' not found in {pkg_mgr_config}")
 
-    # only return the requested managers that are not disabled
-    return {
-        mgr_name: mgrs[mgr_name]
-        for mgr_name in requested_mgrs
-        if not mgrs[mgr_name].disabled
-    }
+    return dict(filter(lambda x: not x[1].disabled, mgrs_def.items()))
 
 
-def load_all(config_dir_str: str = "./configs"):
+async def load_all(config_dir_str: str = "./configs"):
     config_dir = pathlib.Path(config_dir_str)
     if not config_dir.is_dir():
-        ERROR_EXIT(f"Config directory '{config_dir}' does not exist.")
+        await aERROR_EXIT(f"Config directory '{config_dir}' does not exist.")
 
     with printer.PKG_CTX:
         with printer.PKG_CTX("load-conf"):
-            INFO(f"Collecting desire package state in '{config_dir}/'...")
-            load_user_configs(config_dir)
+            await aINFO(f"Collecting desire package state in '{config_dir}/'...")
+            await load_user_configs(config_dir)
 
-            INFO(f"Loading manager definition...")
-            managers = load_mgr_config(config_dir, REQUESTED_MANAGERS.data_pair.keys())
+            await aINFO(
+                f"Loading manager definition at '{config_dir / "pkgmgr.toml"}'..."
+            )
+            managers = await load_mgr_config(
+                config_dir, REQUESTED_MANAGERS.data_pair.keys()
+            )
         return managers
 
 
@@ -218,7 +223,7 @@ async def collect_state(
     """
     Collect the state of all package managers.
     """
-    INFO(f"Checking packages state...")
+    await aINFO(f"Checking packages state...")
 
     want_installed = requested_mgr.pkgs
     currently_installed_packages = set(
@@ -253,7 +258,7 @@ def santise_variable_name(var_str: str):
     return re.sub("\W|^(?=\d)", "_", var_str)
 
 
-def save_wanted_pkgs_to_file(file, pkg_mgr_name, pkgs_wanted, pkgs_not_recorded):
+async def save_wanted_pkgs_to_file(file, pkg_mgr_name, pkgs_wanted, pkgs_not_recorded):
     IDEN_var_name = santise_variable_name(pkg_mgr_name)
 
     file.write("\n" + "#" * 25 + "\n")
@@ -268,12 +273,12 @@ def save_wanted_pkgs_to_file(file, pkg_mgr_name, pkgs_wanted, pkgs_not_recorded)
         file.write(f"\n# wanted\n")
         for pkg_name in pkgs_not_recorded:
             file.write(f"{IDEN_var_name} << {pkg_name.get_config_repr()}\n")
-            INFO(f"Added {pkg_name}")
+            await aINFO(f"Added {pkg_name}")
     if pkgs_wanted:
         file.write(f"\n# unwanted\n")
         for pkg in pkgs_wanted:
             file.write(f"{IDEN_var_name} >> {pkg.name!r}\n")
-            INFO(f"To remove {pkg!r}")
+            await aINFO(f"To remove {pkg!r}")
 
 
 def for_each_registered_mgr(managers: dict[str, PackageManager]):
@@ -290,7 +295,7 @@ async def cmd_save(
     config_dir: pathlib.Path, managers: dict[str, PackageManager], args: Namespace
 ) -> None:
     if not args.force and (config_dir / DEFAULT_SAVE_OUTPUT_FILE).is_file():
-        ERROR_EXIT(
+        await aERROR_EXIT(
             f"File '{DEFAULT_SAVE_OUTPUT_FILE}' already exists. Refusing to continue. "
             "Please organise your packages definition in the config directory first."
         )
@@ -315,50 +320,87 @@ async def cmd_save(
             f.write("from pkgmgr.registry import MANAGERS, Package\n\n")
 
             for datapack in packages_to_write:
-                save_wanted_pkgs_to_file(f, *datapack)
+                await save_wanted_pkgs_to_file(f, *datapack)
 
 
-async def cmd_apply(managers: dict[str, PackageManager]) -> None:
+async def cmd_apply(args: Namespace, managers: dict[str, PackageManager]) -> None:
 
-    for _, pkg_mgr, requested_mgr in for_each_registered_mgr(managers):
+    async def inner_apply(name, pkg_mgr, requested_mgr):
         pkgs_wanted, pkgs_not_recorded = await collect_state(requested_mgr, pkg_mgr)
 
         if pkgs_wanted or pkgs_not_recorded:
-            INFO("The following changes to packages will be applied:")
+            await aINFO("The following changes to packages will be applied:")
 
             for package in pkgs_wanted:
-                INFO(f"  + {package}", GREEN)
+                await aINFO(f"  + {package}", GREEN)
             for package_name in pkgs_not_recorded:
-                INFO(f"  - {package_name}", RED)
+                await aINFO(f"  - {package_name}", RED)
 
-            if ASK_USER("Do you want to apply the changes?"):
+            if await ASK_USER("Do you want to apply the changes?"):
                 if pkgs_wanted:
                     if not await pkg_mgr.install(pkgs_wanted):
-                        ERROR_EXIT("Failed to install packages.")
+                        await aERROR_EXIT("Failed to install packages.")
 
                 if pkgs_not_recorded:
                     if not await pkg_mgr.remove(pkgs_not_recorded):
-                        ERROR_EXIT(f"Failed to remove packages.")
+                        await aERROR_EXIT(f"Failed to remove packages.")
 
+                await aINFO(f"Applied.")
             else:
-                ERROR_EXIT("Aborted.")
+                await aERROR("Aborted.")
 
-            INFO(f"Applied.")
         else:
-            INFO(f"No Change.")
+            await aINFO(f"No Change.")
+
+    await apply_on_each_pkg(
+        args.sync,
+        functor=inner_apply,
+        managers=managers,
+    )
 
 
-async def cmd_diff(managers: dict[str, PackageManager]) -> None:
-    for _, pkg_mgr, requested_mgr in for_each_registered_mgr(managers):
+async def cmd_diff(args: Namespace, managers: dict[str, PackageManager]) -> None:
+
+    async def inner_diff(name, pkg_mgr, requested_mgr):
         pkgs_wanted, pkgs_not_recorded = await collect_state(requested_mgr, pkg_mgr)
 
         if pkgs_wanted or pkgs_not_recorded:
-            INFO("Diff of current system against the configs:")
+            await aINFO("Diff of current system against the configs:")
 
             for package in pkgs_wanted:
-                INFO(f"  + {package}", GREEN)
+                await aINFO(f"  + {package}", GREEN)
             for package_name in pkgs_not_recorded:
-                INFO(f"  - {package_name}", RED)
+                await aINFO(f"  - {package_name}", RED)
 
         else:
-            INFO(f"No Change.")
+            await aINFO(f"No Change.")
+
+    await apply_on_each_pkg(
+        args.sync,
+        functor=inner_diff,
+        managers=managers,
+    )
+
+
+async def apply_on_each_pkg(
+    use_sync: bool,
+    functor: Callable[[str, PackageManager, DeclaredPackageManager], None],
+    managers: dict[str, PackageManager],
+):
+    """
+    A helper function to apply a function on each package manager.
+    """
+
+    async def wrapper(name, pkg_mgr, requested_mgr):
+        # this wrapper enable the context manager to be used
+        # in the async function
+        with printer.PKG_CTX(name):
+            return await functor(name, pkg_mgr, requested_mgr)
+
+    tasks = []
+    for name, pkg_mgr, requested_mgr in for_each_registered_mgr(managers):
+        if use_sync:
+            await wrapper(name, pkg_mgr, requested_mgr)
+        else:
+            tasks.append(wrapper(name, pkg_mgr, requested_mgr))
+    await asyncio.gather(*tasks)
