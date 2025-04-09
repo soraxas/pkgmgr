@@ -308,12 +308,35 @@ async def cmd_save(
 
     packages_to_write = []
 
-    # process all requested managers and see if we need to write anything
-    for pkg_mgr_name, pkg_mgr, requested_mgr in for_each_registered_mgr(managers):
-        pkgs_wanted, pkgs_not_recorded = await collect_state(requested_mgr, pkg_mgr)
-
-        if pkgs_wanted or pkgs_not_recorded:
+    if args.sync:
+        # process all requested managers and see if we need to write anything
+        for pkg_mgr_name, pkg_mgr, requested_mgr in for_each_registered_mgr(managers):
+            pkgs_wanted, pkgs_not_recorded = await collect_state(requested_mgr, pkg_mgr)
             packages_to_write.append((pkg_mgr_name, pkgs_wanted, pkgs_not_recorded))
+    else:
+
+        async def async_wrap(name, coro):
+            with printer.PKG_CTX(name):
+                return name, *(await coro)
+
+        # collect all the packages to write async-ly
+        for coro in asyncio.as_completed(
+            (
+                async_wrap(
+                    pkg_mgr_name,
+                    collect_state(REQUESTED_MANAGERS[pkg_mgr_name], pkg_mgr),
+                )
+                for pkg_mgr_name, pkg_mgr in managers.items()
+            )
+        ):
+            packages_to_write.append(await coro)
+
+    # remove empty packages
+    packages_to_write = [
+        (name, pkgs_wanted, pkgs_not_recorded)
+        for name, pkgs_wanted, pkgs_not_recorded in packages_to_write
+        if pkgs_wanted or pkgs_not_recorded
+    ]
 
     # only start a new file if we have something to write
     if packages_to_write:
