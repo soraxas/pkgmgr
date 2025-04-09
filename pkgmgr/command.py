@@ -3,6 +3,7 @@ import shlex
 from typing import Optional, Tuple, Union, Callable, List
 from dataclasses import dataclass, field
 import inspect
+import os
 import traceback
 
 
@@ -80,6 +81,19 @@ class CompoundCommand(Command):
         return self
 
 
+def smart_expand(token: str) -> str:
+    if token.startswith(("~", "$HOME", "/")):
+        return os.path.expandvars(os.path.expanduser(token))
+    return token
+
+
+def split_script_as_shell(script: str) -> list[str]:
+    """
+    Split a script into a list of commands.
+    """
+    return [smart_expand(s) for s in shlex.split(script)]
+
+
 class ShellScript(Command):
     """
     A class that represents a shell script.
@@ -100,7 +114,7 @@ class ShellScript(Command):
         """
         Pipe the command to another command.
         """
-        ret_code = await command_runner_stream(shlex.split(self.get_script()))
+        ret_code = await command_runner_stream(split_script_as_shell(self.get_script()))
         return self.check_ret_code(ret_code)
 
     async def run_with_output(self) -> CommandResult:
@@ -108,7 +122,7 @@ class ShellScript(Command):
         Pipe the command to another command.
         """
         ret_code, output, stderr = await command_runner_stream_with_output(
-            shlex.split(self.get_script())
+            split_script_as_shell(self.get_script())
         )
         return self.check_ret_code(ret_code), output, stderr
 
