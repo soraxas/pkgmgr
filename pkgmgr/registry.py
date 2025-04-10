@@ -128,6 +128,34 @@ def ensure_package(
             yield from ensure_package(pkg)
 
 
+class FalseDefaultDict:
+    """
+    A custom object that returns False for all attribute accesses unless explicitly set.
+
+    Attributes are stored internally in a dictionary. If an attribute is accessed
+    but has not been set, it returns False instead of raising an AttributeError.
+    """
+
+    def __init__(self):
+        self._data = {}
+
+    def __getattr__(self, name):
+        return self._data.get(name, False)
+
+    def __setattr__(self, name, value):
+        if name == "_data":
+            super().__setattr__(name, value)
+        else:
+            self._data[name] = value
+
+    def __delattr__(self, name):
+        if name in self._data:
+            del self._data[name]
+
+    def __repr__(self):
+        return "Data({})".format(",".join(f"{k}={v}" for (k, v) in self._data.items()))
+
+
 @dataclass
 class DeclaredPackageState:
     """
@@ -199,4 +227,7 @@ class DeclaredPackageManagerRegistry:
         return self.data_pair[item]
 
 
+# This is a singleton object that stores the declared package managers.
 MANAGERS = DeclaredPackageManagerRegistry()
+# This is a global object that will allows user to store their own data.
+USER_DATA = FalseDefaultDict()
