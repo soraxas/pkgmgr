@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 from argparse import Namespace
 import subprocess
 import asyncio
-
+import os
 import tomllib
 import shlex
 from typing import Any, Callable, Dict, Iterable, Optional
@@ -284,10 +284,13 @@ async def cmd_save(
     config_dir: pathlib.Path, managers: dict[str, PackageManager], args: Namespace
 ) -> None:
     if not args.force and (config_dir / DEFAULT_SAVE_OUTPUT_FILE).is_file():
-        await aERROR_EXIT(
-            f"File '{DEFAULT_SAVE_OUTPUT_FILE}' already exists. Refusing to continue. "
-            "Please organise your packages definition in the config directory first."
-        )
+        # test if the file exists but is actually empty. (if so, its ok to overwrite)
+        if os.stat(config_dir / DEFAULT_SAVE_OUTPUT_FILE).st_size > 0:
+            # file is not empty
+            await aERROR_EXIT(
+                f"File '{DEFAULT_SAVE_OUTPUT_FILE}' already exists. Refusing to continue. "
+                "Please organise your packages definition in the config directory first."
+            )
 
     packages_with_changes = []
 
