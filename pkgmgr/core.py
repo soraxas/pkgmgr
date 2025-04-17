@@ -47,8 +47,9 @@ class PackageManager:
     """
 
     list_cmd: Command
-    add_cmd: Command = field(default_factory=lambda: UndefinedCommand())
-    remove_cmd: Command = field(default_factory=lambda: UndefinedCommand())
+    add_cmd: Command = field(default_factory=UndefinedCommand)
+    remove_cmd: Command = field(default_factory=UndefinedCommand)
+    extract_add_cmd_part_cmd: Command = field(default_factory=UndefinedCommand)
     supports_multi_pkgs: bool = False
     supports_save: bool = True
     disabled: bool = False
@@ -82,12 +83,15 @@ class PackageManager:
             for remove_cmd_part in remove_cmd_parts
         )
 
-    async def list_installed(self) -> list[str]:
+    async def list_installed(self) -> list[Package]:
         success, stdout, stderr = await self.list_cmd.run_with_output()
         if not success:
             await aERROR_EXIT(f"Failed to list installed packages: {stderr}")
         if isinstance(stdout, str):
-            return stdout.splitlines()
+            return [
+                Package(pkg) if isinstance(pkg, str) else pkg
+                for pkg in (stdout.splitlines())
+            ]
         return stdout
 
 
@@ -168,7 +172,7 @@ async def load_mgr_config(
         if "success_ret_code" in mgr_config:
             kwargs["success_ret_code"] = set(mgr_config.pop("success_ret_code"))
 
-        for key in ["list_cmd", "add_cmd", "remove_cmd"]:
+        for key in ["list_cmd", "add_cmd", "remove_cmd", "extract_add_cmd_part_cmd"]:
             cmd = mgr_config.pop(key, None)
             if cmd:
                 kwargs[key] = await load_command(cmd, key, mgr_name)
@@ -223,10 +227,7 @@ async def collect_state(
     await aINFO(f"Checking packages state...")
 
     want_installed = requested_state.pkgs
-    currently_installed_packages = set(
-        Package(pkg) if isinstance(pkg, str) else pkg
-        for pkg in (await pkg_mgr.list_installed())
-    )
+    currently_installed_packages = set(await pkg_mgr.list_installed())
 
     #######################################################
 
