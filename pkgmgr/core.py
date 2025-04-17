@@ -447,4 +447,7 @@ async def apply_on_each_pkg(
             await wrapper(name, pkg_mgr, requested_state)
         else:
             tasks.append(wrapper(name, pkg_mgr, requested_state))
-    await asyncio.gather(*tasks, return_exceptions=True)
+
+    # the taks returns nothing. if it did, those would be exception.
+    for error in filter(None, await asyncio.gather(*tasks, return_exceptions=True)):
+        raise error
