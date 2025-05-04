@@ -2,7 +2,7 @@ from argparse import Namespace
 import asyncio
 import os
 import tomllib
-from typing import Any, Callable, Dict, Iterable
+from typing import Any, Callable, Dict, Iterable, Optional
 import importlib.util
 import pathlib
 
@@ -334,7 +334,7 @@ async def cmd_save(config_dir: pathlib.Path, managers: dict[str, PackageManager]
                 await save_wanted_pkgs_to_file(f, *datapack)
 
 
-async def cmd_apply(args: Namespace, managers: dict[str, PackageManager]) -> None:
+async def cmd_apply(args: Namespace, managers: dict[str, PackageManager], target: Optional[str] = None) -> None:
     async def inner_apply(name: str, pkg_mgr: PackageManager, requested_state: DeclaredPackageState):
         pkgs_wanted, pkgs_not_recorded = await collect_state(requested_state, pkg_mgr)
 
@@ -376,10 +376,11 @@ async def cmd_apply(args: Namespace, managers: dict[str, PackageManager]) -> Non
         args.sync,
         functor=inner_apply,
         managers=managers,
+        target=target,
     )
 
 
-async def cmd_diff(args: Namespace, managers: dict[str, PackageManager]) -> None:
+async def cmd_diff(args: Namespace, managers: dict[str, PackageManager], target: Optional[str] = None) -> None:
     async def inner_diff(name, pkg_mgr, requested_state):
         pkgs_wanted, pkgs_not_recorded = await collect_state(requested_state, pkg_mgr)
 
@@ -398,6 +399,7 @@ async def cmd_diff(args: Namespace, managers: dict[str, PackageManager]) -> None
         args.sync,
         functor=inner_diff,
         managers=managers,
+        target=target,
     )
 
 
@@ -405,6 +407,7 @@ async def apply_on_each_pkg(
     use_sync: bool,
     functor: Callable[[str, PackageManager, DeclaredPackageState], Any],
     managers: dict[str, PackageManager],
+    target: Optional[str] = None,
 ):
     """
     A helper function to apply a function on each package manager.
@@ -416,8 +419,17 @@ async def apply_on_each_pkg(
         with printer.PKG_CTX(name):
             return await functor(name, pkg_mgr, requested_state)
 
+    registered_mgr = for_each_registered_mgr(managers)
+    if target is not None and target not in managers:
+        registered_mgr = list(filter(lambda x: x[0] == target, registered_mgr))
+        if len(registered_mgr) == 0:
+            await aERROR_EXIT(f"Target '{target}' not found in registered managers.")
+
     tasks = []
     for name, pkg_mgr, requested_state in for_each_registered_mgr(managers):
+        if target is not None and name != target:
+            # skip this package manager
+            continue
         if use_sync:
             await wrapper(name, pkg_mgr, requested_state)
         else:

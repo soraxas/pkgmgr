@@ -1,3 +1,4 @@
+from enum import Enum
 import sys
 import asyncio
 
@@ -65,7 +66,19 @@ class PackageContext:
                 self.current_pkg.set(None)
 
 
+class Verbosity(Enum):
+    """
+    Enum for verbosity levels.
+    """
+
+    SILENT = 0
+    ERROR = 1
+    WARN = 2
+    INFO = 3
+
+
 PKG_CTX = PackageContext()
+VERBOSITY_CTX = ContextVar("verbosity", default=Verbosity.INFO)
 
 
 def print_prefix(**kw):
@@ -86,9 +99,10 @@ async def amy_print(*args, **kwargs):
         my_print(*args, **kwargs)
 
 
-def my_print(text: str, color: str, end="\n", **kw):
+def my_print(text: str, color: str, end="\n", msg_level: Verbosity = Verbosity.INFO, **kw):
+    if VERBOSITY_CTX.get().value < msg_level.value:
+        return
     global NEEDS_PREFIX
-
     if NEEDS_PREFIX:
         print_prefix()
     print(f"{color}{text}{END}", **kw, end=end)
@@ -104,27 +118,27 @@ async def TERM_STDERR(text: str, **kw):
 
 
 async def aINFO(text: str, color=CYAN):
-    await amy_print(text, color)
+    await amy_print(text, color, msg_level=Verbosity.INFO)
 
 
 def INFO(text: str, color=CYAN):
-    my_print(text, color)
+    my_print(text, color, msg_level=Verbosity.INFO)
 
 
 async def aWARN(text: str, color=PINK):
-    await amy_print(text, color)
+    await amy_print(text, color, msg_level=Verbosity.WARN)
 
 
 def WARN(text: str, color=PINK):
-    my_print(text, color)
+    my_print(text, color, msg_level=Verbosity.WARN)
 
 
 async def aERROR(text: str):
-    await amy_print(text, RED, file=sys.stderr)
+    await amy_print(text, RED, file=sys.stderr, msg_level=Verbosity.ERROR)
 
 
 async def aERROR_EXIT(*args, **kw):
-    await aERROR(*args, **kw)
+    await aERROR(*args, **kw, msg_level=Verbosity.ERROR)
     raise ExitSignal()
 
 
