@@ -19,7 +19,6 @@ class CLIOptions:
     config_dir: Path
     paranoid: bool
     yes: bool
-    verbose: bool
     force: bool
     sync: bool
 
@@ -54,11 +53,12 @@ def runner(
         "--yes",
         help="Never prompt before making any changes to the system",
     ),
-    verbose: bool = typer.Option(
-        False,
+    verbose: int = typer.Option(
+        Verbosity.INFO.value,
         "-v",
         "--verbose",
-        help="Show progress with additional detail",
+        count=True,
+        help="Increase verbosity level (e.g., -v, -vv, -vvv)",
     ),
     force: bool = typer.Option(
         False,
@@ -85,10 +85,17 @@ def runner(
         config_dir=config_dir,
         paranoid=paranoid,
         yes=yes,
-        verbose=verbose,
         force=force,
         sync=sync,
     )
+    if verbose >= 4:
+        VERBOSITY_CTX.set(Verbosity.DEBUG)
+    elif verbose >= 3:
+        VERBOSITY_CTX.set(Verbosity.INFO)
+    elif verbose >= 2:
+        VERBOSITY_CTX.set(Verbosity.WARN)
+    elif verbose >= 1:
+        VERBOSITY_CTX.set(Verbosity.ERROR)
 
     # 👇 If no command is provided, print help and exit
     if ctx.invoked_subcommand is None:
