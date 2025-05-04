@@ -1,6 +1,13 @@
 repos:
--   repo: https://github.com/pre-commit/mirrors-mypy
-    rev: ''  # Use the sha / tag you want to point at
+  - repo: 'https://github.com/pre-commit/mirrors-mypy'
+    rev: ''
     hooks:
-    -   id: mypy
+      - id: mypy
     additional_dependencies: []
+  - repo: 'https://github.com/astral-sh/ruff-pre-commit'
+    rev: v0.11.8
+    hooks:
+      - id: ruff
+        args:
+          - '--fix'
+      - id: ruff-format
