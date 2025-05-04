@@ -1,5 +1,5 @@
-from abc import abstractmethod
-from typing import Optional, Tuple, Union, Callable, List
+from abc import abstractmethod, ABC
+from typing import Optional, Tuple, Union, Callable, List, Awaitable, TypeVar
 import inspect
 import traceback
 
@@ -12,8 +12,11 @@ from .helpers import ExitSignal, async_all, split_script_as_shell
 CommandResult = Tuple[bool, str, str]
 CommandLike = Union[str, Callable[[], CommandResult]]
 
+T = TypeVar("T")
+MaybeAsyncCallable = Union[Callable[[], T], Callable[[], Awaitable[T]]]
 
-class Command:
+
+class Command(ABC):
     """
     A class that represents a command.
     """
@@ -152,7 +155,7 @@ class PipedCommand(ShellScript):
 
 
 class FunctionCommand(Command):
-    def __init__(self, functor: Callable[[], CommandResult]):
+    def __init__(self, functor: MaybeAsyncCallable[CommandResult]):
         self.functor = functor
 
     async def run(self) -> bool:
@@ -160,10 +163,10 @@ class FunctionCommand(Command):
 
     async def run_with_output(self) -> CommandResult:
         try:
-            if inspect.iscoroutinefunction(self.functor):
+            if inspect.iscoroutinefunction(self.functor):  # pytype: disable=not-supported-yet
                 return await self.functor()
             else:
-                return self.functor()
+                return self.functor()  # type: ignore
         except ExitSignal as e:
             await aERROR("Task was cancelled")
             raise e

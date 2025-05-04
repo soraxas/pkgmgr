@@ -2,7 +2,6 @@ import os
 import asyncio
 import typer
 
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 from pkgmgr.helpers import ExitSignal
@@ -12,15 +11,6 @@ from pkgmgr.printer import VERBOSITY_CTX, Verbosity, aINFO, INFO
 
 
 app = typer.Typer(help="Package Manager CLI")
-
-
-@dataclass
-class CLIOptions:
-    config_dir: Path
-    paranoid: bool
-    yes: bool
-    force: bool
-    sync: bool
 
 
 def get_default_config_path() -> Path:
@@ -81,7 +71,7 @@ def runner(
     ),
 ):
     # Store shared args for use in commands
-    ctx.obj = CLIOptions(
+    ctx.obj = core.CLIOptions(
         config_dir=config_dir,
         paranoid=paranoid,
         yes=yes,
@@ -129,7 +119,7 @@ def complete_targets(ctx: typer.Context, incomplete: str):
 @app.command()
 def save(ctx: typer.Context):
     """Save current state"""
-    args: CLIOptions = ctx.obj
+    args: core.CLIOptions = ctx.obj
 
     async def run():
         manager = await core.load_all(args.config_dir)
@@ -147,7 +137,7 @@ def apply(
     target: Optional[str] = typer.Argument(None, autocompletion=complete_targets),
 ):
     """Apply saved configuration"""
-    args: CLIOptions = ctx.obj
+    args: core.CLIOptions = ctx.obj
 
     async def run():
         manager = await core.load_all(args.config_dir)
@@ -162,7 +152,7 @@ def apply(
 @app.command()
 def check(ctx: typer.Context):
     """Check current state"""
-    args: CLIOptions = ctx.obj
+    args: core.CLIOptions = ctx.obj
 
     async def run():
         with printer.PKG_CTX("check"):
@@ -178,7 +168,7 @@ def diff(
     target: Optional[str] = typer.Argument(None, autocompletion=complete_targets),
 ):
     """Show configuration difference"""
-    args: CLIOptions = ctx.obj
+    args: core.CLIOptions = ctx.obj
 
     async def run():
         manager = await core.load_all(args.config_dir)

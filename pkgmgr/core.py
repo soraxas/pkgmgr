@@ -1,11 +1,10 @@
-from argparse import Namespace
 import asyncio
 import os
 import tomllib
 from typing import Any, Callable, Dict, Iterable, Optional
 import importlib.util
-import pathlib
 
+from pathlib import Path
 from dataclasses import dataclass, field
 from . import printer
 from .helpers import async_all, santise_variable_name
@@ -34,6 +33,15 @@ from .registry import (
 )
 
 DEFAULT_SAVE_OUTPUT_FILE = "99.unsorted.py"
+
+
+@dataclass
+class CLIOptions:
+    config_dir: Path
+    paranoid: bool
+    yes: bool
+    force: bool
+    sync: bool
 
 
 @dataclass
@@ -100,7 +108,7 @@ class PackageManager:
         return stdout
 
 
-async def load_user_configs(config_dir: pathlib.Path) -> None:
+async def load_user_configs(config_dir: Path) -> None:
     """
     Load user configs from the config directory.
     """
@@ -149,7 +157,7 @@ async def load_command(
     assert False, "Unreachable code"
 
 
-async def load_mgr_config(config_dir: pathlib.Path, requested_mgrs: Iterable[str]) -> dict[str, PackageManager]:
+async def load_mgr_config(config_dir: Path, requested_mgrs: Iterable[str]) -> dict[str, PackageManager]:
     """
     Load package manager config from the config directory.
     """
@@ -197,8 +205,7 @@ async def load_mgr_config(config_dir: pathlib.Path, requested_mgrs: Iterable[str
     return dict(filter(lambda x: not x[1].disabled, mgrs_def.items()))
 
 
-async def load_all(config_dir_str: str = "./configs"):
-    config_dir = pathlib.Path(config_dir_str)
+async def load_all(config_dir: Path = Path("./configs")):
     if not config_dir.is_dir():
         await aERROR_EXIT(f"Config directory '{config_dir}' does not exist.")
 
@@ -273,7 +280,7 @@ def for_each_registered_mgr(managers: dict[str, PackageManager]):
             yield pkg_mgr_name, pkg_mgr, requested_state
 
 
-async def cmd_save(config_dir: pathlib.Path, managers: dict[str, PackageManager], args: Namespace) -> None:
+async def cmd_save(config_dir: Path, managers: dict[str, PackageManager], args: CLIOptions) -> None:
     if not args.force and (config_dir / DEFAULT_SAVE_OUTPUT_FILE).is_file():
         # test if the file exists but is actually empty. (if so, its ok to overwrite)
         if os.stat(config_dir / DEFAULT_SAVE_OUTPUT_FILE).st_size > 0:
@@ -334,7 +341,7 @@ async def cmd_save(config_dir: pathlib.Path, managers: dict[str, PackageManager]
                 await save_wanted_pkgs_to_file(f, *datapack)
 
 
-async def cmd_apply(args: Namespace, managers: dict[str, PackageManager], target: Optional[str] = None) -> None:
+async def cmd_apply(args: CLIOptions, managers: dict[str, PackageManager], target: Optional[str] = None) -> None:
     async def inner_apply(name: str, pkg_mgr: PackageManager, requested_state: DeclaredPackageState):
         pkgs_wanted, pkgs_not_recorded = await collect_state(requested_state, pkg_mgr)
 
@@ -380,7 +387,7 @@ async def cmd_apply(args: Namespace, managers: dict[str, PackageManager], target
     )
 
 
-async def cmd_diff(args: Namespace, managers: dict[str, PackageManager], target: Optional[str] = None) -> None:
+async def cmd_diff(args: CLIOptions, managers: dict[str, PackageManager], target: Optional[str] = None) -> None:
     async def inner_diff(name, pkg_mgr, requested_state):
         pkgs_wanted, pkgs_not_recorded = await collect_state(requested_state, pkg_mgr)
 

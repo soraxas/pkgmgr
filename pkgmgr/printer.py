@@ -130,6 +130,10 @@ async def aWARN(text: str, color=PINK):
     await amy_print(text, color, msg_level=Verbosity.WARN)
 
 
+async def aDEBUG(text: str, color=GREY):
+    await amy_print(text, color, msg_level=Verbosity.DEBUG)
+
+
 def WARN(text: str, color=PINK):
     my_print(text, color, msg_level=Verbosity.WARN)
 
