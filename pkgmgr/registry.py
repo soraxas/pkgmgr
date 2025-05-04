@@ -1,5 +1,5 @@
 from dataclasses import dataclass, fields
-from typing import Generator, Iterable, Optional, Union, Set, List
+from typing import Generator, Iterable, Optional, Union, Set
 from .printer import aERROR_EXIT, WARN
 
 USER_EXPORT = {}
@@ -40,6 +40,12 @@ class Package:
     def __post_init__(self):
         if self.add_cmd_part and self.extra:
             raise ValueError("Cannot have both add_cmd_part and extra")
+        if not self.extra:  # avoid whitespace
+            self.extra = None
+        if (
+            not self.add_cmd_part or self.add_cmd_part == self.name
+        ):  # pointless to store add_cmd_part if its the same as name
+            self.add_cmd_part = None
 
     def get_add_cmd_part(self):
         if self.add_cmd_part:
@@ -119,7 +125,7 @@ def ensure_package(
     else:
         try:
             some_object_iterator = iter(package)
-        except TypeError as te:
+        except TypeError:
             # not iterable.
             aERROR_EXIT(
                 f"Package {package} is not a string, Package instance, nor list of Packages. Please check your configuration."
@@ -166,9 +172,7 @@ class DeclaredPackageState:
     pkgs: Set[Package]
     ignore_pkgs: Set[Package]
 
-    def add(
-        self, package: Union[str, Package, Iterable[Package]]
-    ) -> "DeclaredPackageState":
+    def add(self, package: Union[str, Package, Iterable[Package]]) -> "DeclaredPackageState":
         for pkg in ensure_package(package):
             if pkg in self.pkgs:
                 WARN(
@@ -181,9 +185,7 @@ class DeclaredPackageState:
     def __lshift__(self, *args) -> "DeclaredPackageState":
         return self.add(*args)
 
-    def remove(
-        self, package: Union[str, Package, Iterable[Package]]
-    ) -> "DeclaredPackageState":
+    def remove(self, package: Union[str, Package, Iterable[Package]]) -> "DeclaredPackageState":
         for pkg in ensure_package(package):
             try:
                 self.pkgs.remove(pkg)
@@ -221,9 +223,7 @@ class DeclaredPackageManagerRegistry:
             return self.data_pair[item]
         except KeyError:
             pass
-        self.data_pair[item] = DeclaredPackageState(
-            name=item, pkgs=set(), ignore_pkgs=set()
-        )
+        self.data_pair[item] = DeclaredPackageState(name=item, pkgs=set(), ignore_pkgs=set())
         return self.data_pair[item]
 
 

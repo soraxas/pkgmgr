@@ -7,22 +7,17 @@ from pkgmgr.helpers import ExitSignal
 
 
 def main():
-
     from . import _version
 
     configpath = os.path.join(
-        os.environ.get("APPDATA")
-        or os.environ.get("XDG_CONFIG_HOME")
-        or os.path.join(os.environ["HOME"], ".config"),
+        os.environ.get("APPDATA") or os.environ.get("XDG_CONFIG_HOME") or os.path.join(os.environ["HOME"], ".config"),
         "pkgmgr",
     )
 
     parser = argparse.ArgumentParser(
         description="Package Manager",
     )
-    parser.add_argument(
-        "--version", action="version", version=f"%(prog)s {_version.version}"
-    )
+    parser.add_argument("--version", action="version", version=f"%(prog)s {_version.version}")
 
     parser.add_argument(
         "-c",

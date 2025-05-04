@@ -1,21 +1,17 @@
-from abc import ABC, abstractmethod
 from argparse import Namespace
-import subprocess
 import asyncio
 import os
 import tomllib
-import shlex
-from typing import Any, Callable, Dict, Iterable, Optional
+from typing import Any, Callable, Dict, Iterable
 import importlib.util
 import pathlib
-import re
 
-from collections.abc import AsyncIterable
 from dataclasses import dataclass, field
 from . import printer
 from .helpers import async_all, santise_variable_name
 from .command import (
     Command,
+    PipedCommand,
     CompoundCommand,
     FunctionCommand,
     ShellScript,
@@ -49,7 +45,7 @@ class PackageManager:
     list_cmd: Command
     add_cmd: Command = field(default_factory=UndefinedCommand)
     remove_cmd: Command = field(default_factory=UndefinedCommand)
-    extract_add_cmd_part_cmd: Command = field(default_factory=UndefinedCommand)
+    extract_add_cmd_part: Command = field(default_factory=UndefinedCommand)
     supports_multi_pkgs: bool = False
     supports_save: bool = True
     disabled: bool = False
@@ -65,8 +61,7 @@ class PackageManager:
 
         # run the install commands
         return await async_all(
-            await self.add_cmd.with_replacement_part(add_cmd_part).run()
-            for add_cmd_part in add_cmd_parts
+            await self.add_cmd.with_replacement_part(add_cmd_part).run() for add_cmd_part in add_cmd_parts
         )
 
     async def remove(self, package: Iterable[Package]) -> bool:
@@ -79,8 +74,7 @@ class PackageManager:
 
         # run the remove commands
         return await async_all(
-            await self.remove_cmd.with_replacement_part(remove_cmd_part).run()
-            for remove_cmd_part in remove_cmd_parts
+            await self.remove_cmd.with_replacement_part(remove_cmd_part).run() for remove_cmd_part in remove_cmd_parts
         )
 
     async def list_installed(self) -> list[Package]:
@@ -88,10 +82,21 @@ class PackageManager:
         if not success:
             await aERROR_EXIT(f"Failed to list installed packages: {stderr}")
         if isinstance(stdout, str):
-            return [
-                Package(pkg) if isinstance(pkg, str) else pkg
-                for pkg in (stdout.splitlines())
-            ]
+            pkgs_str = stdout.splitlines()
+            # if this command supports transforming pkg to add_cmd_part, do it
+            # this normally enrich the package info from cli output
+
+            if isinstance(self.extract_add_cmd_part, UndefinedCommand):
+                pkgs = [Package(pkg) for pkg in pkgs_str]
+            else:
+                pkgs = []
+                for pkg_str in pkgs_str:
+                    ok, part, stderr = await self.extract_add_cmd_part.with_replacement_part(pkg_str).run_with_output()
+                    if not ok:
+                        raise ValueError(f"Error when processing for '{pkg_str}': {stderr}")
+                    pkgs.append(Package(pkg_str, add_cmd_part=part.strip()))
+
+            return pkgs
         return stdout
 
 
@@ -120,7 +125,7 @@ async def load_command(
     elif isinstance(cmd, dict):
         if "py_func_name" in cmd:
             try:
-                func = FunctionCommand(USER_EXPORT[cmd["py_func_name"]])
+                func: Command = FunctionCommand(USER_EXPORT[cmd["py_func_name"]])
             except KeyError:
                 await aERROR_EXIT(
                     f"The specified functino '{cmd['py_func_name']}' is not exported from the module. "
@@ -131,22 +136,20 @@ async def load_command(
                     f"    pass\n"
                 )
             return func
+        elif "piped_cmd" in cmd:
+            assert type(cmd["piped_cmd"]) is list
+            func = PipedCommand(cmd["piped_cmd"])
+            return func
         else:
-            await aERROR_EXIT(
-                f"Manager '{mgr_name}' is missing required command '{key}'"
-            )
+            await aERROR_EXIT(f"Command '{key} for manager '{mgr_name}' has unknown info '{cmd}'")
     elif isinstance(cmd, list):
         return CompoundCommand([await load_command(c, key, mgr_name) for c in cmd])
     else:
-        await aERROR_EXIT(
-            f"Unsupported config type '{type(cmd)}' for command '{key}' in manager '{mgr_name}'"
-        )
+        await aERROR_EXIT(f"Unsupported config type '{type(cmd)}' for command '{key}' in manager '{mgr_name}'")
     assert False, "Unreachable code"
 
 
-async def load_mgr_config(
-    config_dir: pathlib.Path, requested_mgrs: Iterable[str]
-) -> dict[str, PackageManager]:
+async def load_mgr_config(config_dir: pathlib.Path, requested_mgrs: Iterable[str]) -> dict[str, PackageManager]:
     """
     Load package manager config from the config directory.
     """
@@ -165,14 +168,13 @@ async def load_mgr_config(
 
     mgrs_def: dict[str, PackageManager] = {}
     for mgr_name, mgr_config in managers_conf.items():
-
         kwargs: Dict[str, Any] = {}
 
         # configs that require special handling
         if "success_ret_code" in mgr_config:
             kwargs["success_ret_code"] = set(mgr_config.pop("success_ret_code"))
 
-        for key in ["list_cmd", "add_cmd", "remove_cmd", "extract_add_cmd_part_cmd"]:
+        for key in ["list_cmd", "add_cmd", "remove_cmd", "extract_add_cmd_part"]:
             cmd = mgr_config.pop(key, None)
             if cmd:
                 kwargs[key] = await load_command(cmd, key, mgr_name)
@@ -183,13 +185,9 @@ async def load_mgr_config(
         try:
             pkg_mgr = PackageManager(**kwargs)  # type: ignore
         except TypeError as e:
-            simplified_msg = (
-                str(e).replace(f"{PackageManager.__name__}.__init__()", "").strip()
-            )
+            simplified_msg = str(e).replace(f"{PackageManager.__name__}.__init__()", "").strip()
 
-            await aERROR_EXIT(
-                f"Error loading package manager '{mgr_name}': {simplified_msg}"
-            )
+            await aERROR_EXIT(f"Error loading package manager '{mgr_name}': {simplified_msg}")
         mgrs_def[mgr_name] = pkg_mgr
 
     for mgr_name in requested_mgrs:
@@ -209,12 +207,8 @@ async def load_all(config_dir_str: str = "./configs"):
             await aINFO(f"Collecting desire package state in '{config_dir}/'...")
             await load_user_configs(config_dir)
 
-            await aINFO(
-                f"Loading manager definition at '{config_dir / "pkgmgr.toml"}'..."
-            )
-            managers = await load_mgr_config(
-                config_dir, REQUESTED_MANAGERS.data_pair.keys()
-            )
+            await aINFO(f"Loading manager definition at '{config_dir / 'pkgmgr.toml'}'...")
+            managers = await load_mgr_config(config_dir, REQUESTED_MANAGERS.data_pair.keys())
         return managers
 
 
@@ -224,7 +218,7 @@ async def collect_state(
     """
     Collect the state of all package managers.
     """
-    await aINFO(f"Checking packages state...")
+    await aINFO("Checking packages state...")
 
     want_installed = requested_state.pkgs
     currently_installed_packages = set(await pkg_mgr.list_installed())
@@ -238,9 +232,7 @@ async def collect_state(
 
     #######################################################
 
-    pkgs_not_recorded = (
-        currently_installed_packages - set(want_installed) - requested_state.ignore_pkgs
-    )
+    pkgs_not_recorded = currently_installed_packages - set(want_installed) - requested_state.ignore_pkgs
 
     if sort:
         return sorted(pkgs_wanted), sorted(pkgs_not_recorded)
@@ -260,12 +252,12 @@ async def save_wanted_pkgs_to_file(file, pkg_mgr_name, pkgs_wanted, pkgs_not_rec
     # invert to bring the config up-to-speed
 
     if pkgs_not_recorded:
-        file.write(f"\n# wanted\n")
+        file.write("\n# wanted\n")
         for pkg_name in pkgs_not_recorded:
             file.write(f"{IDEN_var_name} << {pkg_name.get_config_repr()}\n")
             await aINFO(f"Added {pkg_name}")
     if pkgs_wanted:
-        file.write(f"\n# unwanted\n")
+        file.write("\n# unwanted\n")
         for pkg in pkgs_wanted:
             file.write(f"{IDEN_var_name} >> {pkg.name!r}\n")
             await aINFO(f"To remove {pkg!r}")
@@ -281,9 +273,7 @@ def for_each_registered_mgr(managers: dict[str, PackageManager]):
             yield pkg_mgr_name, pkg_mgr, requested_state
 
 
-async def cmd_save(
-    config_dir: pathlib.Path, managers: dict[str, PackageManager], args: Namespace
-) -> None:
+async def cmd_save(config_dir: pathlib.Path, managers: dict[str, PackageManager], args: Namespace) -> None:
     if not args.force and (config_dir / DEFAULT_SAVE_OUTPUT_FILE).is_file():
         # test if the file exists but is actually empty. (if so, its ok to overwrite)
         if os.stat(config_dir / DEFAULT_SAVE_OUTPUT_FILE).st_size > 0:
@@ -298,9 +288,7 @@ async def cmd_save(
     if args.sync:
         # process all requested managers and see if we need to write anything
         for pkg_mgr_name, pkg_mgr, requested_state in for_each_registered_mgr(managers):
-            pkgs_wanted, pkgs_not_recorded = await collect_state(
-                requested_state, pkg_mgr
-            )
+            pkgs_wanted, pkgs_not_recorded = await collect_state(requested_state, pkg_mgr)
             packages_with_changes.append((pkg_mgr_name, pkgs_wanted, pkgs_not_recorded))
     else:
 
@@ -328,7 +316,6 @@ async def cmd_save(
                 with printer.PKG_CTX(pkg_mgr_name):
                     await aWARN(
                         f"Manager '{pkg_mgr_name}' has changes, but does not support saving packages to config. "
-                        ""
                     )
                     await aWARN("Use `diff_cmd` to see the changes.")
             else:
@@ -341,7 +328,6 @@ async def cmd_save(
             "a",
             encoding="utf-8",
         ) as f:
-
             f.write("from pkgmgr.registry import MANAGERS, Package\n\n")
 
             for datapack in packages_to_write:
@@ -349,10 +335,7 @@ async def cmd_save(
 
 
 async def cmd_apply(args: Namespace, managers: dict[str, PackageManager]) -> None:
-
-    async def inner_apply(
-        name: str, pkg_mgr: PackageManager, requested_state: DeclaredPackageState
-    ):
+    async def inner_apply(name: str, pkg_mgr: PackageManager, requested_state: DeclaredPackageState):
         pkgs_wanted, pkgs_not_recorded = await collect_state(requested_state, pkg_mgr)
 
         if pkgs_wanted or pkgs_not_recorded:
@@ -367,35 +350,27 @@ async def cmd_apply(args: Namespace, managers: dict[str, PackageManager]) -> Non
             can_remove = not isinstance(pkg_mgr.remove_cmd, UndefinedCommand)
 
             if not can_install and not can_remove:
-                await aWARN(
-                    f"Manager '{name}' does not support installing or removing packages. "
-                )
-                await aWARN(
-                    "You can define `add_cmd` / `remove_cmd` in the config file to enable apply cmd."
-                )
+                await aWARN(f"Manager '{name}' does not support installing or removing packages. ")
+                await aWARN("You can define `add_cmd` / `remove_cmd` in the config file to enable apply cmd.")
             elif await ASK_USER("Do you want to apply the changes?"):
                 if pkgs_wanted:
                     if not can_install:
-                        await aWARN(
-                            f"Manager '{name}' does not support installing packages."
-                        )
+                        await aWARN(f"Manager '{name}' does not support installing packages.")
                     elif not await pkg_mgr.install(pkgs_wanted):
                         await aERROR_EXIT("Failed to install packages.")
 
                 if pkgs_not_recorded:
                     if not can_remove:
-                        await aWARN(
-                            f"Manager '{name}' does not support removing packages."
-                        )
+                        await aWARN(f"Manager '{name}' does not support removing packages.")
                     elif not await pkg_mgr.remove(pkgs_not_recorded):
-                        await aERROR_EXIT(f"Failed to remove packages.")
+                        await aERROR_EXIT("Failed to remove packages.")
 
-                await aINFO(f"Applied.")
+                await aINFO("Applied.")
             else:
                 await aERROR("Aborted.")
 
         else:
-            await aINFO(f"No Change.")
+            await aINFO("No Change.")
 
     await apply_on_each_pkg(
         args.sync,
@@ -405,7 +380,6 @@ async def cmd_apply(args: Namespace, managers: dict[str, PackageManager]) -> Non
 
 
 async def cmd_diff(args: Namespace, managers: dict[str, PackageManager]) -> None:
-
     async def inner_diff(name, pkg_mgr, requested_state):
         pkgs_wanted, pkgs_not_recorded = await collect_state(requested_state, pkg_mgr)
 
@@ -418,7 +392,7 @@ async def cmd_diff(args: Namespace, managers: dict[str, PackageManager]) -> None
                 await aINFO(f"  - {package_name}", RED)
 
         else:
-            await aINFO(f"No Change.")
+            await aINFO("No Change.")
 
     await apply_on_each_pkg(
         args.sync,

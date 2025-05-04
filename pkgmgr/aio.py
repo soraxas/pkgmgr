@@ -1,13 +1,13 @@
 import asyncio
 import sys
 from io import StringIO
-from typing import Any, Callable, Coroutine, Optional, Tuple
+from typing import Callable, Coroutine, Tuple
 
 from pkgmgr.helpers import ExitSignal, connect_stdin_stdout
 
 
 from . import printer
-from .printer import TERM_STDERR, TERM_STDOUT
+from .printer import TERM_STDOUT
 
 
 async def stream_output(
@@ -41,7 +41,7 @@ async def stream_output(
             if show_output and char:
                 # if we needs prefix now, print it.
                 if printer.NEEDS_PREFIX:
-                    await print_func(f"", end="")
+                    await print_func("", end="")
                     printer.NEEDS_PREFIX = False
 
                 sys.stdout.write(char)

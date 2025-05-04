@@ -1,9 +1,6 @@
 from abc import abstractmethod
-import shlex
 from typing import Optional, Tuple, Union, Callable, List
-from dataclasses import dataclass, field
 import inspect
-import os
 import traceback
 
 
@@ -25,14 +22,11 @@ class Command:
     async def run(self) -> bool:
         pass
 
-    @abstractmethod
     async def run_with_output(self) -> CommandResult:
-        pass
+        raise NotImplementedError()
 
     def with_replacement_part(self, part: str) -> "Command":
-        raise NotImplementedError(
-            "This method is not implemented for this command type."
-        )
+        raise NotImplementedError("This method is not implemented for this command type.")
 
 
 class UndefinedCommand(Command):
@@ -41,15 +35,11 @@ class UndefinedCommand(Command):
     """
 
     async def run(self) -> bool:
-        await aERROR_EXIT(
-            "Command is undefined. Please check the command and try again."
-        )
+        await aERROR_EXIT("Command is undefined. Please check the command and try again.")
         raise NotImplementedError()
 
     async def run_with_output(self) -> CommandResult:
-        await aERROR_EXIT(
-            "Command is undefined. Please check the command and try again."
-        )
+        await aERROR_EXIT("Command is undefined. Please check the command and try again.")
         raise NotImplementedError()
 
 
@@ -63,17 +53,6 @@ class CompoundCommand(Command):
 
     async def run(self) -> bool:
         return await async_all(await command.run() for command in self.commands)
-
-    async def run_with_output(self) -> CommandResult:
-        output_all, stderr_all = [], []
-        ret_code = True
-        for cmd in self.commands:
-            ret_code, output, stderr = await cmd.run_with_output()
-            output_all.append(output)
-            stderr_all.append(stderr)
-            if not ret_code:
-                break
-        return ret_code, "\n".join(output_all), "\n".join(stderr_all)
 
     def with_replacement_part(self, part: str) -> "Command":
         for command in self.commands:
@@ -108,9 +87,7 @@ class ShellScript(Command):
         """
         Pipe the command to another command.
         """
-        ret_code, output, stderr = await command_runner_stream_with_output(
-            split_script_as_shell(self.get_script())
-        )
+        ret_code, output, stderr = await command_runner_stream_with_output(split_script_as_shell(self.get_script()))
         return self.check_ret_code(ret_code), output, stderr
 
     def check_ret_code(self, retcode: int) -> bool:
@@ -121,15 +98,60 @@ class ShellScript(Command):
 
     def with_replacement_part(self, part: str) -> "Command":
         if "{}" not in self.script:
-            raise ValueError(
-                "Script must contain '{}' placeholder for replacement part."
-            )
+            raise ValueError("Script must contain '{}' placeholder for replacement part.")
         self._modified_script = self.script.replace("{}", part)
         return self
 
 
-class FunctionCommand(Command):
+class PipedCommand(ShellScript):
+    """
+    A class that represents a command.
+    """
 
+    def __init__(self, commands: List[str]):
+        ShellScript.__init__(self, commands[0])
+        self.commands = commands
+
+    async def run(self) -> bool:
+        return (await self.run_with_output())[0]
+
+    async def run_with_output(self) -> CommandResult:
+        import asyncio
+
+        commands = self.commands
+
+        procs = []
+
+        # Start the first process
+        # the first IS the script due to subclassing
+        args = split_script_as_shell(self.get_script())
+        proc = await asyncio.create_subprocess_exec(*args, stdout=asyncio.subprocess.PIPE)
+        procs.append(proc)
+
+        # Chain the rest
+        for cmd in commands[1:]:
+            # Read output of previous proc
+            stdout, _ = await procs[-1].communicate()
+            # Start next proc with previous stdout as input
+            proc = await asyncio.create_subprocess_exec(
+                *split_script_as_shell(cmd), stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE
+            )
+            assert proc.stdin is not None, "stdin is None"
+            proc.stdin.write(stdout)
+            await proc.stdin.drain()
+            proc.stdin.close()
+
+            procs.append(proc)
+
+        # Wait for final output
+        final_stdout, final_stderr = await procs[-1].communicate()
+        # print(final_stdout)
+        # exit()
+
+        return True, final_stdout.decode(), final_stderr.decode() if final_stderr else ""
+
+
+class FunctionCommand(Command):
     def __init__(self, functor: Callable[[], CommandResult]):
         self.functor = functor
 
@@ -146,8 +168,5 @@ class FunctionCommand(Command):
             await aERROR("Task was cancelled")
             raise e
         except Exception as e:
-
-            await aERROR_EXIT(
-                f"Error while executing function {self.functor.__name__}: {traceback.format_exc()}"
-            )
+            await aERROR_EXIT(f"Error while executing function {self.functor.__name__}: {traceback.format_exc()}")
             raise e
