@@ -139,7 +139,7 @@ async def aERROR(text: str):
 
 
 async def aERROR_EXIT(*args, **kw):
-    await aERROR(*args, **kw, msg_level=Verbosity.ERROR)
+    await aERROR(*args, **kw)
     raise ExitSignal()
 
 
