@@ -1,5 +1,5 @@
 from abc import abstractmethod, ABC
-from typing import Optional, Tuple, Union, Callable, List, Awaitable, TypeVar
+from typing import Optional, Tuple, Union, Callable, List, Awaitable
 import inspect
 import traceback
 
@@ -7,12 +7,11 @@ import traceback
 from pkgmgr.printer import aDEBUG, aERROR_EXIT
 
 from .aio import command_runner_stream, command_runner_stream_with_output
-from .helpers import ExitSignal, async_all, split_script_as_shell
+from .helpers import ExitSignal, async_all, split_script_as_shell, T
 
 CommandResult = Tuple[bool, str, str]
 CommandLike = Union[str, Callable[[], CommandResult]]
 
-T = TypeVar("T")
 MaybeAsyncCallable = Union[Callable[[], T], Callable[[], Awaitable[T]]]
 
 

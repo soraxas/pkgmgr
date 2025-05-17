@@ -1,13 +1,13 @@
 import asyncio
 import os
 import tomllib
-from typing import Any, Callable, Dict, Iterable, Optional
+from typing import Any, Callable, Dict, Iterable, Literal, Optional
 import importlib.util
 
 from pathlib import Path
 from dataclasses import dataclass, field
 from . import printer
-from .helpers import ExitSignal, async_all, santise_variable_name
+from .helpers import ExitSignal, UserSelectOption, async_all, santise_variable_name
 from .command import (
     Command,
     PipedCommand,
@@ -18,7 +18,6 @@ from .command import (
 )
 from .printer import (
     ASK_USER,
-    aERROR,
     aERROR_EXIT,
     aINFO,
     GREEN,
@@ -33,6 +32,9 @@ from .registry import (
 )
 
 DEFAULT_SAVE_OUTPUT_FILE = "99.unsorted.py"
+
+
+OPERATION_LOCK = asyncio.Lock()
 
 
 @dataclass
@@ -247,7 +249,9 @@ async def collect_state(
     return list(pkgs_wanted), list(pkgs_not_recorded)
 
 
-async def save_wanted_pkgs_to_file(file, pkg_mgr_name, pkgs_wanted, pkgs_not_recorded):
+async def save_wanted_pkgs_to_file(
+    file, pkg_mgr_name: str, pkgs_wanted: list[Package], pkgs_not_recorded: list[Package]
+):
     IDEN_var_name = santise_variable_name(pkg_mgr_name)
 
     file.write("\n" + "#" * 25 + "\n")
@@ -316,21 +320,60 @@ async def cmd_save(args: CLIOptions, managers: dict[str, PackageManager], target
 
     # only start a new file if we have something to write
     if packages_to_write:
-        # Check if file exists and if import line needs to be added
-        import_line = "from pkgmgr.registry import MANAGERS, Package\n\n"
-        file_path = args.config_dir / DEFAULT_SAVE_OUTPUT_FILE
-        needs_import = True
+        #######################################################
+        # create options for user to select
+        def get_info_confirm_func(pkg_name: str, msg: str, color: str):
+            async def info_confirm(prefix: str):
+                with printer.PKG_CTX("confirm"):
+                    with printer.PKG_CTX(pkg_name):
+                        await aINFO(f"{prefix}{msg}", color)
 
-        if file_path.exists():
-            with open(file_path, "r", encoding="utf-8") as f:
-                if import_line in f.read():
-                    needs_import = False
+            return info_confirm
 
-        with open(file_path, "a", encoding="utf-8") as f:
-            if needs_import:
-                f.write(import_line)
-            for datapack in packages_to_write:
-                await save_wanted_pkgs_to_file(f, *datapack)
+        options: list[UserSelectOption[tuple[str, Optional[Package], Optional[Package]]]] = []
+        for name, pkgs_wanted, pkgs_not_recorded in packages_to_write:
+            for package in pkgs_not_recorded:
+                options.append(
+                    UserSelectOption(
+                        print=get_info_confirm_func(name, f"Adding {package}", GREEN),
+                        data=(name, None, package),
+                    )
+                )
+            for package in pkgs_wanted:
+                options.append(
+                    UserSelectOption(
+                        print=get_info_confirm_func(name, f"Removing {package}", RED),
+                        data=(name, package, None),
+                    )
+                )
+        async with OPERATION_LOCK:
+            # collect the options into a dict
+            options = await ASK_USER("Do you want to save the changes?", options)
+            if options:
+                to_apply: dict[str, tuple[list[Package], list[Package]]] = {}
+                for name, pkg_wanted, pkg_not_recorded in (o.data for o in options):
+                    data = to_apply.setdefault(name, ([], []))
+                    if pkg_wanted:
+                        data[0].append(pkg_wanted)
+                    if pkg_not_recorded:
+                        data[1].append(pkg_not_recorded)
+            #######################################################
+
+            # Check if file exists and if import line needs to be added
+            import_line = "from pkgmgr.registry import MANAGERS, Package\n\n"
+            file_path = args.config_dir / DEFAULT_SAVE_OUTPUT_FILE
+            needs_import = True
+
+            if file_path.exists():
+                with open(file_path, "r", encoding="utf-8") as f:
+                    if import_line in f.read():
+                        needs_import = False
+
+            with open(file_path, "a", encoding="utf-8") as f:
+                if needs_import:
+                    f.write(import_line)
+                for name, (pkgs_wanted, pkgs_not_recorded) in to_apply.items():
+                    await save_wanted_pkgs_to_file(f, name, pkgs_wanted, pkgs_not_recorded)
 
 
 async def cmd_apply(args: CLIOptions, managers: dict[str, PackageManager], target: Optional[str] = None) -> None:
@@ -340,33 +383,67 @@ async def cmd_apply(args: CLIOptions, managers: dict[str, PackageManager], targe
         if pkgs_wanted or pkgs_not_recorded:
             await aINFO("The following changes to packages are detected:")
 
-            for package in pkgs_wanted:
-                await aINFO(f"  + {package}", GREEN)
-            for package_name in pkgs_not_recorded:
-                await aINFO(f"  - {package_name}", RED)
+            #######################################################
+            # create options for user to select
+            def get_info_confirm_func(msg: str, color: str):
+                async def info_confirm(prefix: str):
+                    # with printer.PKG_CTX("confirm"):
+                    #     with printer.PKG_CTX(pkg_name):
+                    await aINFO(f"{prefix}{msg}", color)
+
+                return info_confirm
 
             can_install = not isinstance(pkg_mgr.add_cmd, UndefinedCommand)
             can_remove = not isinstance(pkg_mgr.remove_cmd, UndefinedCommand)
-
             if not can_install and not can_remove:
                 await aWARN(f"Manager '{name}' does not support installing or removing packages. ")
                 await aWARN("You can define `add_cmd` / `remove_cmd` in the config file to enable apply cmd.")
-            elif await ASK_USER("Do you want to apply the changes?"):
-                if pkgs_wanted:
-                    if not can_install:
-                        await aWARN(f"Manager '{name}' does not support installing packages.")
-                    elif not await pkg_mgr.install(pkgs_wanted):
-                        await aERROR_EXIT("Failed to install packages.")
 
-                if pkgs_not_recorded:
-                    if not can_remove:
-                        await aWARN(f"Manager '{name}' does not support removing packages.")
-                    elif not await pkg_mgr.remove(pkgs_not_recorded):
-                        await aERROR_EXIT("Failed to remove packages.")
+            #######################################################
+            # create options for user to select
+            options: list[UserSelectOption[tuple[Literal["wanted", "not_wanted"], Package]]] = []
+            for package in pkgs_wanted:
+                options.append(
+                    UserSelectOption(
+                        print=get_info_confirm_func(f"+ {package}", GREEN),
+                        data=("wanted", package),
+                    )
+                )
+            for package in pkgs_not_recorded:
+                options.append(
+                    UserSelectOption(
+                        print=get_info_confirm_func(f"- {package}", RED),
+                        data=("not_wanted", package),
+                    )
+                )
 
-                await aINFO("Applied.")
-            else:
-                await aERROR("Aborted.")
+            async with OPERATION_LOCK:
+                options = await ASK_USER("Do you want to apply the changes?", options)
+                if options:
+                    wanted, not_wanted = [], []
+                    for desire, pkg in (o.data for o in options):
+                        if desire == "wanted":
+                            wanted.append(pkg)
+                        else:
+                            not_wanted.append(pkg)
+
+                    if wanted:
+                        if not can_install:
+                            await aWARN(f"Manager '{name}' does not support installing packages.")
+                        else:
+                            if not await pkg_mgr.install(wanted):
+                                await aERROR_EXIT("Failed to add packages.")
+
+                    if not_wanted:
+                        if not can_remove:
+                            await aWARN(f"Manager '{name}' does not support removing packages.")
+                        else:
+                            if not await pkg_mgr.remove(not_wanted):
+                                await aERROR_EXIT("Failed to remove packages.")
+
+                    await aINFO("Applied.")
+                else:
+                    await aINFO("Aborted.")
 
         else:
             await aINFO("No Change.")
@@ -387,9 +464,9 @@ async def cmd_diff(args: CLIOptions, managers: dict[str, PackageManager], target
             await aINFO("Diff of current system against the configs:")
 
             for package in pkgs_wanted:
-                await aINFO(f"  + {package}", GREEN)
+                await aINFO(f"+ {package}", GREEN)
             for package_name in pkgs_not_recorded:
-                await aINFO(f"  - {package_name}", RED)
+                await aINFO(f"- {package_name}", RED)
 
         else:
             await aINFO("No Change.")

@@ -1,9 +1,11 @@
 import asyncio
 from collections.abc import AsyncIterable
+from dataclasses import dataclass
 import os
 import re
 import shlex
 import sys
+from typing import Any, Awaitable, Callable, Generic, TypeVar
 
 
 async def async_all(async_iterable: AsyncIterable[object]) -> bool:
@@ -15,6 +17,20 @@ async def async_all(async_iterable: AsyncIterable[object]) -> bool:
 
 class ExitSignal(Exception):
     pass
+
+
+T = TypeVar("T")
+
+
+@dataclass
+class UserSelectOption(Generic[T]):
+    """
+    A class that represents some option that the user can select.
+    The print takes a prefix, which is the prefix to print before the option.
+    """
+
+    print: Callable[[str], Awaitable[Any]]
+    data: T
 
 
 def santise_variable_name(var_str: str):

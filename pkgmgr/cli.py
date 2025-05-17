@@ -184,13 +184,9 @@ def diff(
     _run_async(run(), args.sync)
 
 
-def _run_async(coro, sync=False):
+def _run_async(coro, sync: bool = False):
     try:
-        if sync:
-            loop = asyncio.get_event_loop()
-            loop.run_until_complete(coro)
-        else:
-            asyncio.run(coro)
+        asyncio.run(coro)
     except (KeyboardInterrupt, ExitSignal):
         INFO("Exiting...")
         raise typer.Exit(1)

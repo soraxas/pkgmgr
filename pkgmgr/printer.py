@@ -1,9 +1,11 @@
-from enum import Enum
+import re
 import sys
 import asyncio
 
+from enum import Enum
 from contextvars import ContextVar
-from .helpers import ExitSignal, async_input_non_blocking
+
+from .helpers import ExitSignal, UserSelectOption, async_input_non_blocking, T
 
 
 PRINT_LOCK = asyncio.Lock()
@@ -61,7 +63,7 @@ class PackageContext:
         if prefix is not None:
             prefix = prefix.split(":")
             if len(prefix) > 1:
-                self.current_pkg.set(prefix[-2])
+                self.current_pkg.set(":".join(prefix[:-1]))
             else:
                 self.current_pkg.set(None)
 
@@ -147,32 +149,89 @@ async def aERROR_EXIT(*args, **kw):
     raise ExitSignal()
 
 
-async def ASK_USER(question: str) -> bool:
-    # try:
+async def parse_indices(index_str: str, max_value: int, min_value: int = 1) -> list[int]:
+    """
+    Parse a string of indices into a list of integers.
+    The indices can be a single number, a range, or a comma-separated list.
+    Examples:
+    - "1" -> [1]
+    - "1-3" -> [1, 2, 3]
+    - "1,2,3 5" -> [1, 2, 3, 5]
+    - "1-3,5" -> [1, 2, 3, 5]
+    """
+    if max_value < min_value:
+        raise ValueError("max_value must be greater than or equal to min_value")
+
+    result = set()
+    tokens = re.split(r"[,\s]+", index_str.strip())
+
+    for token in tokens:
+        if "-" in token:
+            try:
+                start, end = map(int, token.split("-", 1))
+                if start > end:
+                    await aERROR(f"Invalid range: '{token}' (start > end)")
+                for i in range(start, end + 1):
+                    if i < min_value or i > max_value:
+                        await aERROR(f"{i} is out of range ({min_value}-{max_value})")
+                    result.add(i)
+            except ValueError:
+                await aERROR(f"Invalid range format: '{token}'")
+        elif token:
+            try:
+                i = int(token)
+                if i < min_value or i > max_value:
+                    await aERROR(f"{i} is out of range ({min_value}-{max_value})")
+                result.add(i)
+            except ValueError:
+                await aERROR(f"Invalid number: '{token}'")
+
+    return sorted(result)
+
+
+async def ASK_USER(question: str, options: list[UserSelectOption[T]]) -> list[UserSelectOption[T]]:
     global NEEDS_PREFIX
 
     while True:
-        async with PRINT_LOCK:
-            print_prefix()
-            try:
-                answer = (
-                    await async_input_non_blocking(
-                        f"{PURPLE}{BOLD}> {UNDERLINE}{question}{END} {PURPLE}(y/n){LIGHT_GRAY} "
-                    )
-                ).lower()
-            except:
-                # when error, we need to end the line
-                print()  # complete the newline
-                raise
-            finally:
-                # always reset the prefix after user input
-                NEEDS_PREFIX = True
-
-        if answer in ["y", "yes"]:
-            return True
-        elif answer in ["n", "no"]:
-            return False
+        # print the options
+        if len(options) == 1:
+            await options[0].print("")
         else:
+            max_width = len(str(len(options)))
+            for index, option in enumerate(options):
+                await option.print(f"{index + 1:{max_width}d} ")
+
+        if True:
+            option_str = ""
+            if len(options) > 1:
+                option_str = f"/1-{len(options)}"
+            async with PRINT_LOCK:
+                print_prefix()
+                try:
+                    answer = (
+                        await async_input_non_blocking(
+                            f"{PURPLE}{BOLD}> {UNDERLINE}{question}{END} {PURPLE}(y/n{option_str}){LIGHT_GRAY} "
+                        )
+                    ).lower()
+                except:
+                    # when error, we need to end the line
+                    print()  # complete the newline
+                    raise
+                finally:
+                    # always reset the prefix after user input
+                    NEEDS_PREFIX = True
+
+            if answer in ["y", "yes"]:
+                return options
+            elif answer in ["n", "no"]:
+                return []
+            if len(options) > 1:
+                indices = await parse_indices(answer, len(options))
+                if indices:
+                    # select the options
+                    options = [options[i - 1] for i in indices]
+                    continue
+
             await aERROR(f"Invalid input, please enter 'y' or 'n'{END}")
 
 
