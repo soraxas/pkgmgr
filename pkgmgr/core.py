@@ -287,7 +287,7 @@ async def cmd_save(config_dir: Path, managers: dict[str, PackageManager], args: 
             # file is not empty
             await aERROR_EXIT(
                 f"File '{DEFAULT_SAVE_OUTPUT_FILE}' already exists. Refusing to continue. "
-                "Please organise your packages definition in the config directory first."
+                "Please organise your packages definition in the config directory first. [use -f to force]"
             )
 
     packages_with_changes = []

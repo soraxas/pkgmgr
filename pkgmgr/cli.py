@@ -50,12 +50,6 @@ def runner(
         count=True,
         help="Increase verbosity level (e.g., -v, -vv, -vvv)",
     ),
-    force: bool = typer.Option(
-        False,
-        "-f",
-        "--force",
-        help="Allow overwriting existing files",
-    ),
     sync: bool = typer.Option(
         False,
         "-s",
@@ -75,7 +69,7 @@ def runner(
         config_dir=config_dir,
         paranoid=paranoid,
         yes=yes,
-        force=force,
+        force=False,
         sync=sync,
     )
     if verbose >= 4:
@@ -117,9 +111,18 @@ def complete_targets(ctx: typer.Context, incomplete: str):
 
 
 @app.command()
-def save(ctx: typer.Context):
+def save(
+    ctx: typer.Context,
+    force: bool = typer.Option(
+        False,
+        "-f",
+        "--force",
+        help="Allow overwriting existing files",
+    ),
+):
     """Save current state"""
     args: core.CLIOptions = ctx.obj
+    args.force = force
 
     async def run():
         manager = await core.load_all(args.config_dir)
