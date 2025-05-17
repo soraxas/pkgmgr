@@ -12,6 +12,7 @@ readme = {file = "README.md", content-type = "text/markdown"}
 dependencies = [
   "typer==0.15.4"
 ]
+requires-python = ">=3.10"
 
 [project.optional-dependencies]
 dev = [
