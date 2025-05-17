@@ -53,7 +53,9 @@ build:
     source {{ACTIVATE}} && python -m build
 
 # Publish to PyPI (uses twine)
-publish: clean build
+@publish: clean build
+    #!/bin/sh
+    export TWINE_PASSWORD="$(rbw get pypi.org soraxas -f 'Token for "cli-update-pypi"')"
     source {{ACTIVATE}} && twine upload dist/*
 
 # Clean build artifacts
