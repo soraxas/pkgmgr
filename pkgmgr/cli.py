@@ -10,7 +10,7 @@ from pkgmgr import _version, core, printer
 from pkgmgr.printer import VERBOSITY_CTX, Verbosity, aINFO, INFO
 
 
-app = typer.Typer(help="Package Manager CLI")
+app = typer.Typer(help="Package Manager CLI", no_args_is_help=True)
 
 
 def get_default_config_path() -> Path:
@@ -80,11 +80,6 @@ def runner(
         VERBOSITY_CTX.set(Verbosity.WARN)
     elif verbose >= 1:
         VERBOSITY_CTX.set(Verbosity.ERROR)
-
-    # 👇 If no command is provided, print help and exit
-    if ctx.invoked_subcommand is None:
-        typer.echo(ctx.get_help())
-        raise typer.Exit()
 
 
 def raise_exit():

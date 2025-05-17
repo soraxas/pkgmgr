@@ -10,7 +10,7 @@ license = {"file" = "LICENSE"}
 name = "pkgmgr"
 readme = {file = "README.md", content-type = "text/markdown"}
 dependencies = [
-  "typer==0.15.3"
+  "typer==0.15.4"
 ]
 
 [project.optional-dependencies]
