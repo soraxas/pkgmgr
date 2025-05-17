@@ -280,68 +280,55 @@ def for_each_registered_mgr(managers: dict[str, PackageManager]):
             yield pkg_mgr_name, pkg_mgr, requested_state
 
 
-async def cmd_save(config_dir: Path, managers: dict[str, PackageManager], args: CLIOptions) -> None:
-    if not args.force and (config_dir / DEFAULT_SAVE_OUTPUT_FILE).is_file():
+async def cmd_save(args: CLIOptions, managers: dict[str, PackageManager], target: Optional[str] = None) -> None:
+    if not args.force and (args.config_dir / DEFAULT_SAVE_OUTPUT_FILE).is_file():
         # test if the file exists but is actually empty. (if so, its ok to overwrite)
-        if os.stat(config_dir / DEFAULT_SAVE_OUTPUT_FILE).st_size > 0:
+        if os.stat(args.config_dir / DEFAULT_SAVE_OUTPUT_FILE).st_size > 0:
             # file is not empty
             await aERROR_EXIT(
                 f"File '{DEFAULT_SAVE_OUTPUT_FILE}' already exists. Refusing to continue. "
                 "Please organise your packages definition in the config directory first. [use -f to force]"
             )
 
-    packages_with_changes = []
-
-    if args.sync:
-        # process all requested managers and see if we need to write anything
-        for pkg_mgr_name, pkg_mgr, requested_state in for_each_registered_mgr(managers):
-            pkgs_wanted, pkgs_not_recorded = await collect_state(requested_state, pkg_mgr)
-            packages_with_changes.append((pkg_mgr_name, pkgs_wanted, pkgs_not_recorded))
-    else:
-
-        async def async_wrap(name, coro):
-            with printer.PKG_CTX(name):
-                return name, *(await coro)
-
-        # collect all the packages to write async-ly
-        for coro in asyncio.as_completed(
-            (
-                async_wrap(
-                    pkg_mgr_name,
-                    collect_state(REQUESTED_MANAGERS[pkg_mgr_name], pkg_mgr),
-                )
-                for pkg_mgr_name, pkg_mgr in managers.items()
-            )
-        ):
-            # process result
-            try:
-                result = await coro
-                packages_with_changes.append(result)
-            except ExitSignal:
-                pass
-
-    # remove empty packages, and post-process
+    # since this is async, not thread, we can safely use a list to store result.
     packages_to_write = []
-    for pkg_mgr_name, pkgs_wanted, pkgs_not_recorded in packages_with_changes:
+
+    async def inner_save(name: str, pkg_mgr: PackageManager, requested_state: DeclaredPackageState):
+        try:
+            pkgs_wanted, pkgs_not_recorded = await collect_state(requested_state, pkg_mgr)
+        except ExitSignal:
+            # perhaps this package uses binary that does not exists
+            return
+
         if pkgs_wanted or pkgs_not_recorded:
-            if not managers[pkg_mgr_name].supports_save:
-                with printer.PKG_CTX(pkg_mgr_name):
-                    await aWARN(
-                        f"Manager '{pkg_mgr_name}' has changes, but does not support saving packages to config. "
-                    )
-                    await aWARN("Use `diff_cmd` to see the changes.")
+            if not pkg_mgr.supports_save:
+                await aWARN(f"Manager '{name}' has changes, but does not support saving packages to config. ")
+                await aWARN("Use `diff_cmd` to see the changes.")
             else:
-                packages_to_write.append((pkg_mgr_name, pkgs_wanted, pkgs_not_recorded))
+                packages_to_write.append((name, pkgs_wanted, pkgs_not_recorded))
+
+    await apply_on_each_pkg(
+        args.sync,
+        functor=inner_save,
+        managers=managers,
+        target=target,
+    )
 
     # only start a new file if we have something to write
     if packages_to_write:
-        with open(
-            config_dir / DEFAULT_SAVE_OUTPUT_FILE,
-            "a",
-            encoding="utf-8",
-        ) as f:
-            f.write("from pkgmgr.registry import MANAGERS, Package\n\n")
+        # Check if file exists and if import line needs to be added
+        import_line = "from pkgmgr.registry import MANAGERS, Package\n\n"
+        file_path = args.config_dir / DEFAULT_SAVE_OUTPUT_FILE
+        needs_import = True
 
+        if file_path.exists():
+            with open(file_path, "r", encoding="utf-8") as f:
+                if import_line in f.read():
+                    needs_import = False
+
+        with open(file_path, "a", encoding="utf-8") as f:
+            if needs_import:
+                f.write(import_line)
             for datapack in packages_to_write:
                 await save_wanted_pkgs_to_file(f, *datapack)
 

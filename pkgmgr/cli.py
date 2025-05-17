@@ -113,6 +113,7 @@ def complete_targets(ctx: typer.Context, incomplete: str):
 @app.command()
 def save(
     ctx: typer.Context,
+    target: Optional[str] = typer.Argument(None, autocompletion=complete_targets),
     force: bool = typer.Option(
         False,
         "-f",
@@ -128,7 +129,7 @@ def save(
         manager = await core.load_all(args.config_dir)
         with printer.PKG_CTX("save"):
             await aINFO("Executing save...")
-            await core.cmd_save(args.config_dir, manager, args)
+            await core.cmd_save(args, manager, target)
             await aINFO("All done.")
 
     _run_async(run(), args.sync)
