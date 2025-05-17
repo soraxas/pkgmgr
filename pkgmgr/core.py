@@ -7,7 +7,7 @@ import importlib.util
 from pathlib import Path
 from dataclasses import dataclass, field
 from . import printer
-from .helpers import async_all, santise_variable_name
+from .helpers import ExitSignal, async_all, santise_variable_name
 from .command import (
     Command,
     PipedCommand,
@@ -313,7 +313,12 @@ async def cmd_save(config_dir: Path, managers: dict[str, PackageManager], args: 
                 for pkg_mgr_name, pkg_mgr in managers.items()
             )
         ):
-            packages_with_changes.append(await coro)
+            # process result
+            try:
+                result = await coro
+                packages_with_changes.append(result)
+            except ExitSignal:
+                pass
 
     # remove empty packages, and post-process
     packages_to_write = []

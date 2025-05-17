@@ -1,5 +1,7 @@
 import asyncio
 import sys
+import shutil
+
 from io import StringIO
 from typing import Callable, Coroutine, Tuple
 
@@ -78,6 +80,18 @@ async def command_runner_stream(
     Adds a prefix for new lines and detects user input.
     Returns the process return code.
     """
+    # check if the given command is valid / exists
+    if not command:
+        await printer.aERROR("Command is empty")
+        raise ExitSignal()
+    if not shutil.which(command[0]):
+        await printer.aERROR(f"Command not found: {command[0]}")
+        raise ExitSignal()
+    # if sudo is used, check the actual command is valid
+    if command[0] == "sudo" and len(command) > 1 and not shutil.which(command[1]):
+        await printer.aERROR(f"Command not found: {command[1]}")
+        raise ExitSignal()
+
     await printer.aINFO(f"{printer.BLUE}${printer.LIGHT_BLUE} {' '.join(command)}")
     process = await asyncio.create_subprocess_exec(
         *command,

@@ -4,7 +4,7 @@ import inspect
 import traceback
 
 
-from pkgmgr.printer import aERROR, aERROR_EXIT
+from pkgmgr.printer import aDEBUG, aERROR_EXIT
 
 from .aio import command_runner_stream, command_runner_stream_with_output
 from .helpers import ExitSignal, async_all, split_script_as_shell
@@ -168,7 +168,7 @@ class FunctionCommand(Command):
             else:
                 return self.functor()  # type: ignore
         except ExitSignal as e:
-            await aERROR("Task was cancelled")
+            await aDEBUG("Task was cancelled")
             raise e
         except Exception as e:
             await aERROR_EXIT(f"Error while executing function {self.functor.__name__}: {traceback.format_exc()}")
