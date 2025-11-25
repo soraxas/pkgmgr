@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Optional
 from pkgmgr.helpers import ExitSignal
 
-from pkgmgr import _version, core, printer
+from pkgmgr import __version__, core, printer
 from pkgmgr.printer import VERBOSITY_CTX, Verbosity, aINFO, INFO
 
 
@@ -59,7 +59,7 @@ def runner(
     version: bool = typer.Option(
         None,
         "--version",
-        callback=lambda v: (print(f"pkgmgr {_version.version}"), raise_exit()) if v else None,
+        callback=lambda v: (print(f"pkgmgr {__version__}"), raise_exit()) if v else None,
         is_eager=True,
         help="Show the version and exit",
     ),

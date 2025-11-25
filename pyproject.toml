@@ -33,7 +33,6 @@ pkgmgr = "pkgmgr.cli:main"
 
 [tool.coverage.run]
 omit = [
-  "./pkgmgr/_version.py",
   "./pkgmgr/__init__.py",
   "./tests/*"
 ]
@@ -45,7 +44,7 @@ plugins = []
 asyncio_default_fixture_loop_scope = "function"
 
 [tool.ruff]
-exclude = [".venv", "./pkgmgr/_version.py"]
+exclude = [".venv"]
 line-length = 120
 
 [tool.setuptools.dynamic]
